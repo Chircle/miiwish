@@ -103,6 +103,11 @@ function normalizeItemInput(data = {}){
   };
 }
 
+function getFallbackImage(color = '#C9D6EE'){ 
+  const seed = encodeURIComponent(color.replace('#', ''));
+  return `https://picsum.photos/seed/miiwish-${seed}/800/600`;
+}
+
 function seedDemoIfNeeded(){
   if (localStorage.getItem('wl_items') === null) localStorage.setItem('wl_items', JSON.stringify(DEMO_ITEMS));
   if (localStorage.getItem('wl_requests') === null) localStorage.setItem('wl_requests', JSON.stringify(DEMO_REQUESTS));
@@ -121,6 +126,7 @@ const db = {
     const normalized = normalizeItemInput(item);
     normalized.color = PALETTE[Math.floor(Math.random()*PALETTE.length)];
     normalized.reserved = false;
+    normalized.image = normalized.image || getFallbackImage(normalized.color);
     if (DEMO_MODE){
       const items = JSON.parse(localStorage.getItem('wl_items') || '[]');
       normalized.id = 'i'+Date.now();
@@ -153,8 +159,45 @@ const db = {
     const snap = await firestoreDb.collection('requests').orderBy('ts','asc').get();
     return snap.docs.map(d=>({id:d.id, ...d.data()}));
   },
+  async findExistingRequestForEmail(email){
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return null;
+
+    if (DEMO_MODE){
+      const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
+      const existing = reqs.find(r => String(r.email || '').toLowerCase() === normalized && (!r.status || r.status !== 'denied'));
+      return existing ? existing : null;
+    }
+
+    const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
+    const existing = snap.docs.find(doc => {
+      const data = doc.data();
+      return !data.status || data.status !== 'denied';
+    });
+    return existing ? { id: existing.id, ...existing.data() } : null;
+  },
+  async setExistingRequestStatusByEmail(email, status){
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return;
+
+    if (DEMO_MODE){
+      const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
+      const updated = reqs.map(r => String(r.email || '').toLowerCase() === normalized ? { ...r, status } : r);
+      localStorage.setItem('wl_requests', JSON.stringify(updated));
+      return;
+    }
+
+    const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
+    const tasks = snap.docs.map(doc => firestoreDb.collection('requests').doc(doc.id).update({ status }));
+    await Promise.all(tasks);
+  },
   async addRequest(data){
     const request = normalizeRequestData(data);
+    const existing = await this.findExistingRequestForEmail(request.email);
+    if (existing && (!existing.status || existing.status !== 'denied')) {
+      return existing.id || existing.docId || null;
+    }
+
     if (DEMO_MODE){
       const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
       const id = 'req'+Date.now();
@@ -403,6 +446,19 @@ async function checkStatus(){
   startStatusPolling();
 }
 
+async function refreshAfterApprovalCheck(){
+  const myReqId = localStorage.getItem('wl_myRequestId');
+  if (!myReqId) return;
+
+  const status = await db.getRequestStatus(myReqId);
+  if (status === 'approved') {
+    hideAllGates();
+    show('mainContent');
+    await renderItems(false);
+    stopStatusPolling();
+  }
+}
+
 async function submitRequest(){
   const name = document.getElementById('nameInput').value.trim();
   const email = document.getElementById('emailInput').value.trim();
@@ -415,9 +471,25 @@ async function submitRequest(){
     return;
   }
 
+  const existing = await db.findExistingRequestForEmail(email);
+  if (existing && (!existing.status || existing.status !== 'denied')) {
+    localStorage.setItem('wl_myRequestId', existing.id);
+    errEl.textContent = 'Du hast bereits eine Anfrage gesendet. Bitte warte auf die Freigabe.';
+    errEl.classList.remove('hidden');
+    await checkStatus();
+    return;
+  }
+
   errEl.classList.add('hidden');
   const id = await db.addRequest({ name, email, reason });
+  if (!id) {
+    errEl.textContent = 'Es ist ein Fehler beim Senden aufgetreten. Bitte versuche es erneut.';
+    errEl.classList.remove('hidden');
+    return;
+  }
   localStorage.setItem('wl_myRequestId', id);
+  errEl.textContent = 'Deine Anfrage wurde gesendet. Bitte warte auf die Freigabe.';
+  errEl.classList.remove('hidden');
   await checkStatus();
 }
 
@@ -427,12 +499,13 @@ async function renderItems(asAdmin){
   const grid = document.getElementById('itemsGrid');
   grid.innerHTML = '';
   items.forEach(item=>{
+    const finalImage = item.image || getFallbackImage(item.color || '#C9D6EE');
     const el = document.createElement('div');
     el.className = 'item' + (!asAdmin && item.reserved ? ' is-reserved' : '');
     el.innerHTML = `
       ${!asAdmin && item.reserved ? '<div class="reserved-tag">reserviert</div>' : ''}
-      ${item.image
-        ? `<img class="thumb" src="${escapeAttr(item.image)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(item.color||'#C9D6EE')}'))">`
+      ${finalImage
+        ? `<img class="thumb" src="${escapeAttr(finalImage)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(item.color||'#C9D6EE')}'))">`
         : fallbackThumbHtml(item.color||'#C9D6EE')}
       <div class="body">
         <h3>${escapeHtml(item.title)}</h3>
@@ -526,7 +599,18 @@ async function renderAdmin(){
   });
 }
 
-async function respondRequest(id, status){ await db.setRequestStatus(id, status); await renderAdmin(); }
+async function respondRequest(id, status){
+  await db.setRequestStatus(id, status);
+  const reqs = await db.getRequests();
+  const target = reqs.find(r => r.id === id);
+  if (target && target.email) {
+    await db.setExistingRequestStatusByEmail(target.email, status);
+  }
+  if (status === 'approved' && localStorage.getItem('wl_myRequestId') === id) {
+    await refreshAfterApprovalCheck();
+  }
+  await renderAdmin();
+}
 
 /* Scraping-Flow im Admin-Panel */
 async function runScrape(){
@@ -539,8 +623,9 @@ async function runScrape(){
   try{
     const data = await scrapeUrl(url);
     lastScraped = data;
-    document.getElementById('previewImg').src = data.image || '';
-    document.getElementById('previewImg').style.display = data.image ? 'block' : 'none';
+    const previewImage = data.image || getFallbackImage('#C9D6EE');
+    document.getElementById('previewImg').src = previewImage;
+    document.getElementById('previewImg').style.display = 'block';
     document.getElementById('previewTitle').value = data.title || '';
     document.getElementById('previewPrice').value = data.price || '';
     document.getElementById('previewDesc').value = data.description || '';

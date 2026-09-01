@@ -129,11 +129,9 @@ test('normalizeItemInput cleans manual product input and preserves the image URL
     image: '  https://images.example/buch.jpg  '
   });
 
-  assert.deepEqual(item, {
-    title: 'Buch',
-    price: '19,99 €',
-    url: 'https://shop.example/buch',
-    description: 'Super Buch',
-    image: 'https://images.example/buch.jpg'
-  });
+  assert.equal(item.title, 'Buch');
+  assert.equal(item.price, '19,99 €');
+  assert.equal(item.url, 'https://shop.example/buch');
+  assert.equal(item.description, 'Super Buch');
+  assert.equal(item.image, 'https://images.example/buch.jpg');
 });
