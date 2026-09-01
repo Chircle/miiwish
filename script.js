@@ -65,6 +65,12 @@ if (!DEMO_MODE && typeof firebase !== 'undefined'){
   firebase.initializeApp(firebaseConfig);
   firestoreDb = firebase.firestore();
   auth = firebase.auth();
+
+  if (auth && auth.setPersistence) {
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {
+      console.warn('Firebase persistence konnte nicht aktiviert werden.');
+    });
+  }
 }
 
 const PALETTE = ['#F5D3DA','#C9D6EE','#D7C6E3','#E9C97D','#AFD3D3'];
@@ -279,6 +285,23 @@ function isAuthenticatedUser(){
   return !!(auth && auth.currentUser);
 }
 
+function applyAdminState(user){
+  isAdmin = !!user;
+  document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
+
+  if (!isAdmin) {
+    const myReqId = localStorage.getItem('wl_myRequestId');
+    if (!myReqId){ hideAllGates(); show('gateRequest'); return; }
+    checkStatus();
+    return;
+  }
+
+  renderAdmin();
+  hideAllGates();
+  show('mainContent'); show('adminArea');
+  renderItems(true);
+}
+
 async function init(){
   if (DEMO_MODE){ seedDemoIfNeeded(); show('demoBanner'); }
 
@@ -291,6 +314,13 @@ async function init(){
     s.style.left = Math.random()*100+'%';
     s.style.animationDelay = (Math.random()*4)+'s';
     stars.appendChild(s);
+  }
+
+  if (auth && auth.onAuthStateChanged) {
+    auth.onAuthStateChanged((user) => {
+      applyAdminState(user);
+    });
+    return;
   }
 
   isAdmin = isAuthenticatedUser();
