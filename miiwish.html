@@ -32,8 +32,10 @@
 
   <div id="gateRequest" class="gate hidden">
     <h2>Zugang anfragen</h2>
-    <p>Trag deinen Namen ein, dann gebe ich dich manuell frei.</p>
+    <p>Bitte gib deinen Namen und deine E-Mail an, damit ich deinen Zugriff prüfen kann.</p>
     <input id="nameInput" type="text" placeholder="Dein Name" />
+    <input id="emailInput" type="email" placeholder="Deine E-Mail" />
+    <textarea id="reasonInput" rows="3" placeholder="Warum möchtest du Zugriff? (optional)"></textarea>
     <button class="btn" onclick="submitRequest()">Anfrage senden</button>
     <div id="requestErr" class="err hidden"></div>
   </div>

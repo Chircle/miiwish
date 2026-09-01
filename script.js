@@ -33,9 +33,31 @@ function shouldUseDemoMode(config, firebaseAvailable = typeof firebase !== 'unde
 
 const DEMO_MODE = shouldUseDemoMode(firebaseConfig, typeof firebase !== 'undefined');
 
-/* CORS-Proxy für das Scraping (öffentlicher Dienst, kann gelegentlich
-   langsam oder limitiert sein — bei Bedarf gegen einen eigenen Proxy tauschen) */
-const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+/* Scraping-Proxy-Chain. Der Browser versucht erst die direkte URL und fällt nur
+   dann auf öffentliche Proxys zurück. So wird kein unnötiger Request gestartet,
+   wenn die Seite bereits direkt erreichbar ist. */
+const CORS_PROXIES = [
+  "https://r.jina.ai/http://",
+  "https://api.allorigins.win/raw?url="
+];
+
+async function fetchPageHtml(url){
+  const candidates = [url, ...CORS_PROXIES.map(proxy => proxy + encodeURIComponent(url))];
+  let lastError = null;
+
+  for (const candidate of candidates){
+    try {
+      const res = await fetch(candidate, { headers: { Accept: 'text/html' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await res.text();
+      if (html && html.trim().length > 0) return html;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Seite konnte nicht geladen werden.');
+}
 
 let firestoreDb = null;
 let auth = null;
@@ -53,7 +75,17 @@ const DEMO_ITEMS = [
   {id:'d3', title:'Wanderrucksack 25L', price:'69,90 €', url:'', description:'Für Tagestouren, wasserdicht, mit Rückenbelüftung.', image:'https://picsum.photos/seed/rucksack/400/300', reserved:false, color:'#C8983B'},
   {id:'d4', title:'Zimmerpflanze Monstera', price:'', url:'', description:'Freu mich über jede Grünpflanze fürs Wohnzimmer.', image:'https://picsum.photos/seed/pflanze/400/300', reserved:false, color:'#6E8F73'},
 ];
-const DEMO_REQUESTS = [ {id:'r1', name:'Tante Sabine', status:'pending', ts:Date.now()-3600000} ];
+const DEMO_REQUESTS = [
+  {id:'r1', name:'Tante Sabine', email:'tante.sabine@example.com', reason:'Ich bin die Schwester der Gastgeberin.', status:'pending', ts:Date.now()-3600000}
+];
+
+function normalizeRequestData(data = {}){
+  return {
+    name: String(data.name || '').trim(),
+    email: String(data.email || '').trim().toLowerCase(),
+    reason: String(data.reason || '').trim()
+  };
+}
 
 function seedDemoIfNeeded(){
   if (localStorage.getItem('wl_items') === null) localStorage.setItem('wl_items', JSON.stringify(DEMO_ITEMS));
@@ -104,15 +136,16 @@ const db = {
     const snap = await firestoreDb.collection('requests').orderBy('ts','asc').get();
     return snap.docs.map(d=>({id:d.id, ...d.data()}));
   },
-  async addRequest(name){
+  async addRequest(data){
+    const request = normalizeRequestData(data);
     if (DEMO_MODE){
       const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
       const id = 'req'+Date.now();
-      reqs.push({id, name, status:'pending', ts:Date.now()});
+      reqs.push({id, ...request, status:'pending', ts:Date.now()});
       localStorage.setItem('wl_requests', JSON.stringify(reqs));
       return id;
     }
-    const ref = await firestoreDb.collection('requests').add({name, status:'pending', ts:Date.now()});
+    const ref = await firestoreDb.collection('requests').add({ ...request, status:'pending', ts: Date.now() });
     return ref.id;
   },
   async getRequestStatus(id){
@@ -192,9 +225,7 @@ function deriveTitleFromUrl(url){
 }
 
 async function scrapeUrl(url){
-  const res = await fetch(CORS_PROXY + encodeURIComponent(url));
-  if (!res.ok) throw new Error('Seite konnte nicht geladen werden.');
-  const html = await res.text();
+  const html = await fetchPageHtml(url);
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
   let title = getMeta(doc, ['meta[property="og:title"]','meta[name="twitter:title"]','meta[name="title"]','title']);
@@ -218,11 +249,31 @@ async function scrapeUrl(url){
    ============================================================ */
 let isAdmin = false;
 let lastScraped = null;
+let statusPollTimer = null;
 
 function show(id){ document.getElementById(id).classList.remove('hidden'); }
 function hide(id){ document.getElementById(id).classList.add('hidden'); }
 function hideAllGates(){ ['gateRequest','gateWaiting','gateDenied','mainContent','adminArea'].forEach(hide); }
 function dismissBanner(){ hide('demoBanner'); }
+
+function stopStatusPolling(){
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = null;
+  }
+}
+
+function startStatusPolling(){
+  stopStatusPolling();
+  statusPollTimer = setInterval(async () => {
+    const myReqId = localStorage.getItem('wl_myRequestId');
+    if (!myReqId) {
+      stopStatusPolling();
+      return;
+    }
+    await checkStatus();
+  }, 5000);
+}
 
 function isAuthenticatedUser(){
   return !!(auth && auth.currentUser);
@@ -260,19 +311,47 @@ async function init(){
 
 async function checkStatus(){
   const myReqId = localStorage.getItem('wl_myRequestId');
+  if (!myReqId){
+    stopStatusPolling();
+    hideAllGates();
+    show('gateRequest');
+    return;
+  }
+
   const status = await db.getRequestStatus(myReqId);
   hideAllGates();
-  if (status === 'approved'){ show('mainContent'); await renderItems(false); }
-  else if (status === 'denied'){ show('gateDenied'); }
-  else { show('gateWaiting'); }
+
+  if (status === 'approved'){
+    stopStatusPolling();
+    show('mainContent');
+    await renderItems(false);
+    return;
+  }
+
+  if (status === 'denied'){
+    stopStatusPolling();
+    show('gateDenied');
+    return;
+  }
+
+  show('gateWaiting');
+  startStatusPolling();
 }
 
 async function submitRequest(){
   const name = document.getElementById('nameInput').value.trim();
+  const email = document.getElementById('emailInput').value.trim();
+  const reason = document.getElementById('reasonInput').value.trim();
   const errEl = document.getElementById('requestErr');
-  if (!name){ errEl.textContent='Bitte gib deinen Namen ein.'; errEl.classList.remove('hidden'); return; }
+
+  if (!name || !email){
+    errEl.textContent = 'Bitte gib mindestens deinen Namen und deine E-Mail ein.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
   errEl.classList.add('hidden');
-  const id = await db.addRequest(name);
+  const id = await db.addRequest({ name, email, reason });
   localStorage.setItem('wl_myRequestId', id);
   await checkStatus();
 }
@@ -349,7 +428,12 @@ async function renderAdmin(){
   pending.forEach(r=>{
     const row = document.createElement('div');
     row.className='request-row';
-    row.innerHTML = `<span>${escapeHtml(r.name)}</span>
+    row.innerHTML = `
+      <div>
+        <div><strong>${escapeHtml(r.name)}</strong></div>
+        ${r.email ? `<div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(r.email)}</div>` : ''}
+        ${r.reason ? `<div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(r.reason)}</div>` : ''}
+      </div>
       <span class="actions">
         <button class="btn small" onclick="respondRequest('${r.id}','approved')">Freigeben</button>
         <button class="btn small secondary" onclick="respondRequest('${r.id}','denied')">Ablehnen</button>
@@ -518,5 +602,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { resolveFirebaseConfig, shouldUseDemoMode };
+  module.exports = { resolveFirebaseConfig, shouldUseDemoMode, normalizeRequestData };
 }

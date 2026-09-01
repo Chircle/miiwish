@@ -105,3 +105,16 @@ test('shouldUseDemoMode turns on demo mode when Firebase is missing or config is
   assert.equal(shouldUseDemoMode({ apiKey: 'real-key', projectId: 'real-project' }, false), true);
   assert.equal(shouldUseDemoMode({ apiKey: 'real-key', projectId: 'real-project' }, true), false);
 });
+
+test('normalizeRequestData keeps the important access-request fields and trims whitespace', () => {
+  const { normalizeRequestData } = loadScriptWithWindow({});
+  const request = normalizeRequestData({
+    name: '  Max Mustermann  ',
+    email: '  max@example.com  ',
+    reason: '  Ich möchte die Liste sehen.  '
+  });
+
+  assert.equal(request.name, 'Max Mustermann');
+  assert.equal(request.email, 'max@example.com');
+  assert.equal(request.reason, 'Ich möchte die Liste sehen.');
+});
