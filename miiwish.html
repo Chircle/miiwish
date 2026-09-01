@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Miiwish</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Jost:wght@300;400;500&family=Petit+Formal+Script&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="demoBanner" class="demo-banner hidden">
+  Vorschau-Modus mit Beispieldaten — noch nicht mit Firebase verbunden. <button onclick="dismissBanner()">Ausblenden</button>
+</div>
+
+<header class="hero">
+  <div id="starField"></div>
+  <div class="intro">
+    <span class="kicker signature">Miiwish</span>
+    <h1>Meine Wunschliste</h1>
+    <p>Alles, worüber ich mich freuen würde. Ein Link genügt — Bild, Preis und Beschreibung holt sich die Liste selbst.</p>
+  </div>
+  <button class="btn secondary admin-toggle" id="adminToggleBtn" onclick="toggleAdminSession()">Admin</button>
+</header>
+<div class="wave"><svg viewBox="0 0 1440 70" preserveAspectRatio="none"><path d="M0,20 C240,60 480,0 720,25 C960,50 1200,10 1440,35 L1440,70 L0,70 Z" fill="#FBF6F0"/></svg></div>
+
+<div class="wrap">
+
+  <div id="gateRequest" class="gate hidden">
+    <h2>Zugang anfragen</h2>
+    <p>Trag deinen Namen ein, dann gebe ich dich manuell frei.</p>
+    <input id="nameInput" type="text" placeholder="Dein Name" />
+    <button class="btn" onclick="submitRequest()">Anfrage senden</button>
+    <div id="requestErr" class="err hidden"></div>
+  </div>
+
+  <div id="gateWaiting" class="gate hidden">
+    <div class="waiting-icon">☾</div>
+    <h2>Noch nicht freigegeben</h2>
+    <p>Deine Anfrage wartet auf Freigabe. Schau später nochmal vorbei.</p>
+    <button class="btn secondary" onclick="checkStatus()">Nochmal prüfen</button>
+  </div>
+
+  <div id="gateDenied" class="gate hidden">
+    <h2>Zugang nicht gewährt</h2>
+    <p>Für diese Wunschliste wurde dir kein Zugang gegeben.</p>
+  </div>
+
+  <section id="mainContent" class="items hidden">
+    <div id="itemsGrid" class="grid"></div>
+  </section>
+
+  <div id="adminArea" class="hidden">
+    <h2 class="section-title">Offene Anfragen</h2>
+    <div class="panel"><div id="requestsList"></div></div>
+
+    <h2 class="section-title">Wunsch per Link hinzufügen</h2>
+    <div class="panel">
+      <div class="scrape-row">
+        <input id="scrapeUrlInput" type="text" placeholder="https://shop.beispiel.de/produkt/...">
+        <button class="btn small" id="scrapeBtn" onclick="runScrape()">Daten abrufen</button>
+      </div>
+      <div class="scrape-status" id="scrapeStatus"></div>
+
+      <div id="previewBox" class="hidden">
+        <div class="preview-grid">
+          <img id="previewImg" src="" alt="">
+          <div class="preview-fields">
+            <input id="previewTitle" type="text" placeholder="Titel">
+            <input id="previewPrice" type="text" placeholder="Preis (z. B. 39,90 €)">
+            <textarea id="previewDesc" maxlength="150" oninput="updateCharCount()" placeholder="Kurzbeschreibung (max. 150 Zeichen)"></textarea>
+            <div class="char-count"><span id="charCount">0</span>/150</div>
+          </div>
+        </div>
+        <button class="btn" onclick="saveScrapedItem()">Wunsch speichern</button>
+      </div>
+
+      <details style="margin-top:20px;">
+        <summary style="cursor:pointer; font-size:13px; color:var(--ink-soft);">Stattdessen manuell eintragen</summary>
+        <div class="preview-fields" style="margin-top:14px;">
+          <input id="manualTitle" type="text" placeholder="Titel">
+          <input id="manualPrice" type="text" placeholder="Preis (optional)">
+          <input id="manualUrl" type="text" placeholder="Link (optional)">
+          <textarea id="manualDesc" maxlength="150" placeholder="Kurzbeschreibung (optional)"></textarea>
+          <button class="btn small" style="justify-self:start;" onclick="addManualItem()">Manuell hinzufügen</button>
+        </div>
+      </details>
+    </div>
+
+    <h2 class="section-title">Meine Wünsche verwalten</h2>
+    <div class="panel"><div id="adminItemsList"></div></div>
+  </div>
+
+  <footer class="foot">Miiwish · privat geteilt</footer>
+</div>
+
+<div id="adminModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h3>Admin-Login</h3>
+    <input id="adminEmailInput" type="email" placeholder="E-Mail" onkeydown="if(event.key==='Enter')tryAdminLogin()">
+    <input id="adminPassInput" type="password" placeholder="Passwort" onkeydown="if(event.key==='Enter')tryAdminLogin()">
+    <div id="adminErr" class="err hidden">Login fehlgeschlagen.</div>
+    <div class="row">
+      <button class="btn secondary" onclick="closeAdminModal()">Abbrechen</button>
+      <button class="btn" onclick="tryAdminLogin()">Einloggen</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
