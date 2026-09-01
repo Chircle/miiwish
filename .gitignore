@@ -1,0 +1,5 @@
+# local-only Firebase config (never commit secrets or real app settings)
+firebase-config.local.js
+
+# optional local dev files
+.DS_Store

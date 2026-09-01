@@ -1,15 +1,16 @@
 /* ============================================================
-   KONFIGURATION — hier später deine echten Firebase-Daten eintragen
+   KONFIGURATION — Werte kommen lokal aus firebase-config.local.js
+   oder aus GitHub Actions (generierter build file)
    ============================================================ */
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-const DEMO_MODE = !firebaseConfig.projectId || firebaseConfig.projectId.includes("YOUR_") || typeof firebase === 'undefined';
+const firebaseConfig = (window.MIIWISH_FIREBASE_CONFIG || {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
+});
+const DEMO_MODE = !firebaseConfig.apiKey || !firebaseConfig.projectId || firebaseConfig.projectId.includes("YOUR_") || typeof firebase === 'undefined';
 
 /* CORS-Proxy für das Scraping (öffentlicher Dienst, kann gelegentlich
    langsam oder limitiert sein — bei Bedarf gegen einen eigenen Proxy tauschen) */
