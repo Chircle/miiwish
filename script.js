@@ -1,15 +1,31 @@
 /* ============================================================
-   KONFIGURATION — Werte kommen lokal aus firebase-config.local.js
-   oder aus GitHub Actions (generierter build file)
+   KONFIGURATION — GitHub Actions schreibt die Secret-Werte in eine
+   globale JS-Config, die der Browser hier einliest. Direkt aus den
+   GitHub-Env-Variablen kann der Client nicht lesen; sie müssen zuerst
+   in eine Datei bzw. globale Variable geschrieben werden.
    ============================================================ */
-const firebaseConfig = (window.MIIWISH_FIREBASE_CONFIG || {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  storageBucket: "",
-  messagingSenderId: "",
-  appId: ""
-});
+function resolveFirebaseConfig(){
+  const defaults = {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+  };
+
+  const root = typeof window !== 'undefined' ? window : globalThis;
+  const globalConfig = root.MIIWISH_FIREBASE_CONFIG || {};
+  const envLikeConfig = root.__MIIWISH_ENV__ || {};
+
+  return {
+    ...defaults,
+    ...envLikeConfig,
+    ...globalConfig
+  };
+}
+
+const firebaseConfig = resolveFirebaseConfig();
 const DEMO_MODE = !firebaseConfig.apiKey || !firebaseConfig.projectId || firebaseConfig.projectId.includes("YOUR_") || typeof firebase === 'undefined';
 
 /* CORS-Proxy für das Scraping (öffentlicher Dienst, kann gelegentlich
@@ -465,7 +481,7 @@ function closeAdminModal(){ hide('adminModal'); }
 
 async function tryAdminLogin(){
   if (!auth){
-    document.getElementById('adminErr').textContent = 'Firebase Auth ist noch nicht konfiguriert. Trage zuerst deine Firebase-Config ein.';
+    document.getElementById('adminErr').textContent = 'Firebase ist noch nicht verfügbar. Bitte zuerst den GitHub-Workflow ausführen, damit firebase-config.js erzeugt wird.';
     show('adminErr');
     return;
   }
@@ -492,4 +508,10 @@ async function tryAdminLogin(){
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 function escapeAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
 
-init();
+if (typeof document !== 'undefined') {
+  init();
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { resolveFirebaseConfig };
+}
