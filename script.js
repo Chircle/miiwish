@@ -93,6 +93,16 @@ function normalizeRequestData(data = {}){
   };
 }
 
+function normalizeItemInput(data = {}){
+  return {
+    title: String(data.title || '').trim(),
+    price: String(data.price || '').trim(),
+    url: String(data.url || '').trim(),
+    description: String(data.description || '').trim().slice(0,150),
+    image: String(data.image || '').trim()
+  };
+}
+
 function seedDemoIfNeeded(){
   if (localStorage.getItem('wl_items') === null) localStorage.setItem('wl_items', JSON.stringify(DEMO_ITEMS));
   if (localStorage.getItem('wl_requests') === null) localStorage.setItem('wl_requests', JSON.stringify(DEMO_REQUESTS));
@@ -108,16 +118,17 @@ const db = {
     return snap.docs.map(d=>({id:d.id, ...d.data()}));
   },
   async addItem(item){
-    item.color = PALETTE[Math.floor(Math.random()*PALETTE.length)];
-    item.reserved = false;
+    const normalized = normalizeItemInput(item);
+    normalized.color = PALETTE[Math.floor(Math.random()*PALETTE.length)];
+    normalized.reserved = false;
     if (DEMO_MODE){
       const items = JSON.parse(localStorage.getItem('wl_items') || '[]');
-      item.id = 'i'+Date.now();
-      items.push(item);
+      normalized.id = 'i'+Date.now();
+      items.push(normalized);
       localStorage.setItem('wl_items', JSON.stringify(items));
       return;
     }
-    await firestoreDb.collection('items').add({...item, ts: Date.now()});
+    await firestoreDb.collection('items').add({...normalized, ts: Date.now()});
   },
   async deleteItem(id){
     if (DEMO_MODE){
@@ -591,9 +602,9 @@ async function addManualItem(){
     price: document.getElementById('manualPrice').value.trim(),
     url: document.getElementById('manualUrl').value.trim(),
     description: document.getElementById('manualDesc').value.trim().slice(0,150),
-    image: ''
+    image: document.getElementById('manualImage').value.trim()
   });
-  ['manualTitle','manualPrice','manualUrl','manualDesc'].forEach(id=>document.getElementById(id).value='');
+  ['manualTitle','manualPrice','manualUrl','manualImage','manualDesc'].forEach(id=>document.getElementById(id).value='');
   await renderAdmin();
   await renderItems(true);
 }
@@ -656,5 +667,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { resolveFirebaseConfig, shouldUseDemoMode, normalizeRequestData };
+  module.exports = { resolveFirebaseConfig, shouldUseDemoMode, normalizeRequestData, normalizeItemInput };
 }

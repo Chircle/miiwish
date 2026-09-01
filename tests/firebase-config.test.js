@@ -118,3 +118,22 @@ test('normalizeRequestData keeps the important access-request fields and trims w
   assert.equal(request.email, 'max@example.com');
   assert.equal(request.reason, 'Ich möchte die Liste sehen.');
 });
+
+test('normalizeItemInput cleans manual product input and preserves the image URL', () => {
+  const { normalizeItemInput } = loadScriptWithWindow({});
+  const item = normalizeItemInput({
+    title: '  Buch  ',
+    price: '  19,99 €  ',
+    url: '  https://shop.example/buch  ',
+    description: '  Super Buch  ',
+    image: '  https://images.example/buch.jpg  '
+  });
+
+  assert.deepEqual(item, {
+    title: 'Buch',
+    price: '19,99 €',
+    url: 'https://shop.example/buch',
+    description: 'Super Buch',
+    image: 'https://images.example/buch.jpg'
+  });
+});
