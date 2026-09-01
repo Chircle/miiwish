@@ -177,6 +177,29 @@ const db = {
 /* ============================================================
    URL-Scraping
    ============================================================ */
+function normalizeImageUrl(value, baseUrl){
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('//')) return 'https:' + trimmed;
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
+
+  try {
+    return new URL(trimmed, baseUrl).href;
+  } catch (error) {
+    return trimmed;
+  }
+}
+
+function findFirstImage(doc, baseUrl){
+  const candidates = Array.from(doc.querySelectorAll('img[src]'));
+  for (const img of candidates){
+    const src = normalizeImageUrl(img.getAttribute('src'), baseUrl);
+    if (src && !src.includes('data:image/svg+xml')) return src;
+  }
+  return '';
+}
+
 function getMeta(doc, selectors){
   for (const sel of selectors){
     const el = doc.querySelector(sel);
@@ -241,7 +264,8 @@ async function scrapeUrl(url){
     titleFromUrl = !!title;
   }
   let image = getMeta(doc, ['meta[property="og:image"]','meta[name="twitter:image"]']);
-  if (image && image.startsWith('//')) image = 'https:' + image;
+  if (!image) image = findFirstImage(doc, url);
+  image = normalizeImageUrl(image, url);
   let description = getMeta(doc, ['meta[property="og:description"]','meta[name="description"]']);
   description = description.slice(0,150);
   let price = getMeta(doc, ['meta[property="product:price:amount"]','meta[property="og:price:amount"]','meta[itemprop="price"]']);

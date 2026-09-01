@@ -116,13 +116,13 @@
   .scrape-row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
   .scrape-row input{ flex:1; min-width:220px; padding:11px 14px; border:1px solid rgba(91,71,99,.25); border-radius:10px; font-family:inherit; font-size:14px;}
   .scrape-status{ font-size:13px; color:var(--ink-soft); margin-bottom:14px; min-height:18px; }
-  .preview-grid{ display:grid; grid-template-columns:120px 1fr; gap:18px; align-items:start; margin-bottom:18px;}
-  .preview-grid img{ width:120px; height:90px; object-fit:cover; border-radius:14px; background:var(--periwinkle); }
-  .preview-fields{ display:grid; gap:10px; }
+  .preview-grid{ display:grid; grid-template-columns:minmax(160px,220px) minmax(0,1fr); gap:18px; align-items:start; margin-bottom:18px; }
+  .preview-grid img{ width:100%; max-width:220px; height:150px; object-fit:cover; border-radius:14px; background:var(--periwinkle); display:block; }
+  .preview-fields{ display:grid; gap:10px; width:100%; min-width:0; }
   .preview-fields input, .preview-fields textarea{
-    padding:9px 12px; border:1px solid rgba(91,71,99,.25); border-radius:8px; font-family:inherit; font-size:13.5px; width:100%;
+    padding:11px 12px; border:1px solid rgba(91,71,99,.25); border-radius:10px; font-family:inherit; font-size:14px; width:100%; min-height:42px;
   }
-  .preview-fields textarea{ resize:vertical; min-height:50px; }
+  .preview-fields textarea{ resize:vertical; min-height:86px; }
   .char-count{ font-size:11.5px; color:var(--ink-soft); text-align:right; }
 
   .request-row, .item-admin-row{ display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid rgba(91,71,99,.1); font-size:14.5px; gap:10px; flex-wrap:wrap;}
@@ -143,4 +143,4 @@
   .hidden{ display:none !important; }
   footer.foot{ text-align:center; font-size:12.5px; color:var(--ink-soft); padding:50px 0 30px; }
 
-  @media (max-width:640px){ .preview-grid{ grid-template-columns:1fr; } .preview-grid img{ width:100%; height:140px; } }
+  @media (max-width:640px){ .preview-grid{ grid-template-columns:1fr; } .preview-grid img{ width:100%; max-width:none; height:180px; } }
