@@ -111,18 +111,7 @@
   </div>
 </div>
 
-<script>
-  (function(){
-    const configUrl = 'firebase-config.js';
-    const script = document.createElement('script');
-    script.src = configUrl;
-    script.async = false;
-    script.onerror = function () {
-      console.info('firebase-config.js not found; continuing in demo mode.');
-    };
-    document.head.appendChild(script);
-  })();
-</script>
+<script src="firebase-config.js" onerror="console.info('firebase-config.js not found; continuing in demo mode.');"></script>
 <script src="script.js"></script>
 </body>
 </html>
