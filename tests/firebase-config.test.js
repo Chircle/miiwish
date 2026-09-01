@@ -91,3 +91,17 @@ test('resolveFirebaseConfig uses env-like values before the generated config fie
   assert.equal(resolveFirebaseConfig().projectId, 'generated-project');
   assert.equal(resolveFirebaseConfig().apiKey, 'generated-api-key');
 });
+
+test('shouldUseDemoMode turns on demo mode when Firebase is missing or config is incomplete', () => {
+  const { shouldUseDemoMode } = loadScriptWithWindow({
+    MIIWISH_FIREBASE_CONFIG: {
+      apiKey: 'real-key',
+      projectId: 'real-project'
+    }
+  });
+
+  assert.equal(shouldUseDemoMode({ apiKey: '', projectId: 'real-project' }, true), true);
+  assert.equal(shouldUseDemoMode({ apiKey: 'real-key', projectId: 'YOUR_PROJECT' }, true), true);
+  assert.equal(shouldUseDemoMode({ apiKey: 'real-key', projectId: 'real-project' }, false), true);
+  assert.equal(shouldUseDemoMode({ apiKey: 'real-key', projectId: 'real-project' }, true), false);
+});

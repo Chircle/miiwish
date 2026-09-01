@@ -26,7 +26,12 @@ function resolveFirebaseConfig(){
 }
 
 const firebaseConfig = resolveFirebaseConfig();
-const DEMO_MODE = !firebaseConfig.apiKey || !firebaseConfig.projectId || firebaseConfig.projectId.includes("YOUR_") || typeof firebase === 'undefined';
+
+function shouldUseDemoMode(config, firebaseAvailable = typeof firebase !== 'undefined'){
+  return !config.apiKey || !config.projectId || config.projectId.includes("YOUR_") || !firebaseAvailable;
+}
+
+const DEMO_MODE = shouldUseDemoMode(firebaseConfig, typeof firebase !== 'undefined');
 
 /* CORS-Proxy für das Scraping (öffentlicher Dienst, kann gelegentlich
    langsam oder limitiert sein — bei Bedarf gegen einen eigenen Proxy tauschen) */
@@ -513,5 +518,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { resolveFirebaseConfig };
+  module.exports = { resolveFirebaseConfig, shouldUseDemoMode };
 }
