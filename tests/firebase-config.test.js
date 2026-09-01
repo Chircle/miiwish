@@ -135,3 +135,12 @@ test('normalizeItemInput cleans manual product input and preserves the image URL
   assert.equal(item.description, 'Super Buch');
   assert.equal(item.image, 'https://images.example/buch.jpg');
 });
+
+test('getRequestPendingMessage clearly tells the user that a request was already sent', () => {
+  const { getRequestStatusMessage } = loadScriptWithWindow({});
+
+  assert.equal(getRequestStatusMessage('pending'), 'Du hast bereits eine Anfrage gestellt. Bitte warte auf die Freigabe.');
+  assert.equal(getRequestStatusMessage('approved'), 'Dein Zugriff wurde freigegeben. Du kannst deine Wunschliste jetzt sehen.');
+  assert.equal(getRequestStatusMessage('denied'), 'Dein Zugang wurde nicht freigegeben.');
+  assert.equal(getRequestStatusMessage(null), '');
+});

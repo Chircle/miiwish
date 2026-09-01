@@ -103,6 +103,41 @@ function normalizeItemInput(data = {}){
   };
 }
 
+function getRequestStatusMessage(status){
+  if (status === 'pending') {
+    return 'Du hast bereits eine Anfrage gestellt. Bitte warte auf die Freigabe.';
+  }
+
+  if (status === 'approved') {
+    return 'Dein Zugriff wurde freigegeben. Du kannst deine Wunschliste jetzt sehen.';
+  }
+
+  if (status === 'denied') {
+    return 'Dein Zugang wurde nicht freigegeben.';
+  }
+
+  return '';
+}
+
+function setRequestFeedback(message, isError = true){
+  const errEl = document && document.getElementById ? document.getElementById('requestErr') : null;
+  if (!errEl) return;
+
+  if (!message) {
+    errEl.textContent = '';
+    errEl.classList.add('hidden');
+    return;
+  }
+
+  errEl.textContent = message;
+  errEl.classList.remove('hidden');
+  if (isError) {
+    errEl.classList.add('err');
+  } else {
+    errEl.classList.remove('err');
+  }
+}
+
 function getFallbackImage(color = '#C9D6EE'){ 
   const seed = encodeURIComponent(color.replace('#', ''));
   return `https://picsum.photos/seed/miiwish-${seed}/800/600`;
@@ -334,9 +369,17 @@ async function scrapeUrl(url){
 let isAdmin = false;
 let lastScraped = null;
 let statusPollTimer = null;
+let adminPollTimer = null;
 
 function show(id){ document.getElementById(id).classList.remove('hidden'); }
 function hide(id){ document.getElementById(id).classList.add('hidden'); }
+function scrollToSection(sectionId, event){
+  event.preventDefault();
+  const el = document.getElementById(sectionId);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth' });
+  }
+}
 function hideAllGates(){ ['gateRequest','gateWaiting','gateDenied','mainContent','adminArea'].forEach(hide); }
 function dismissBanner(){ hide('demoBanner'); }
 
@@ -359,6 +402,38 @@ function startStatusPolling(){
   }, 5000);
 }
 
+function stopAdminPolling(){
+  if (adminPollTimer) {
+    clearInterval(adminPollTimer);
+    adminPollTimer = null;
+  }
+}
+
+function startAdminPolling(){
+  stopAdminPolling();
+  adminPollTimer = setInterval(async () => {
+    if (!isAdmin) {
+      stopAdminPolling();
+      return;
+    }
+    await renderAdmin();
+  }, 3000);
+}
+
+function getMyReservedItems(){
+  const myReqId = localStorage.getItem('wl_myRequestId');
+  if (!myReqId) return [];
+  const key = 'wl_reserved_' + myReqId;
+  return JSON.parse(localStorage.getItem(key) || '[]');
+}
+
+function setMyReservedItems(ids){
+  const myReqId = localStorage.getItem('wl_myRequestId');
+  if (!myReqId) return;
+  const key = 'wl_reserved_' + myReqId;
+  localStorage.setItem(key, JSON.stringify(ids));
+}
+
 function isAuthenticatedUser(){
   return !!(auth && auth.currentUser);
 }
@@ -368,13 +443,15 @@ function applyAdminState(user){
   document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
 
   if (!isAdmin) {
+    stopAdminPolling();
     const myReqId = localStorage.getItem('wl_myRequestId');
-    if (!myReqId){ hideAllGates(); show('gateRequest'); return; }
+    if (!myReqId){ hideAllGates(); show('gateRequest'); setRequestMode('new'); return; }
     checkStatus();
     return;
   }
 
   renderAdmin();
+  startAdminPolling();
   hideAllGates();
   show('mainContent'); show('adminArea');
   renderItems(true);
@@ -413,7 +490,7 @@ async function init(){
   }
 
   const myReqId = localStorage.getItem('wl_myRequestId');
-  if (!myReqId){ hideAllGates(); show('gateRequest'); return; }
+  if (!myReqId){ hideAllGates(); show('gateRequest'); setRequestMode('new'); return; }
   await checkStatus();
 }
 
@@ -421,6 +498,7 @@ async function checkStatus(){
   const myReqId = localStorage.getItem('wl_myRequestId');
   if (!myReqId){
     stopStatusPolling();
+    setRequestFeedback('');
     hideAllGates();
     show('gateRequest');
     return;
@@ -431,6 +509,7 @@ async function checkStatus(){
 
   if (status === 'approved'){
     stopStatusPolling();
+    setRequestFeedback('');
     show('mainContent');
     await renderItems(false);
     return;
@@ -438,10 +517,12 @@ async function checkStatus(){
 
   if (status === 'denied'){
     stopStatusPolling();
+    setRequestFeedback(getRequestStatusMessage('denied'));
     show('gateDenied');
     return;
   }
 
+  setRequestFeedback(getRequestStatusMessage('pending'));
   show('gateWaiting');
   startStatusPolling();
 }
@@ -459,6 +540,49 @@ async function refreshAfterApprovalCheck(){
   }
 }
 
+function setRequestMode(mode){
+  const modeNewEl = document.getElementById('modeNew');
+  const modeCheckEl = document.getElementById('modeCheck');
+  const modeNewBtn = document.getElementById('modeNewBtn');
+  const modeCheckBtn = document.getElementById('modeCheckBtn');
+
+  if (mode === 'new') {
+    show(modeNewEl.id);
+    hide(modeCheckEl.id);
+    modeNewBtn.classList.remove('secondary');
+    modeCheckBtn.classList.add('secondary');
+  } else {
+    hide(modeNewEl.id);
+    show(modeCheckEl.id);
+    modeNewBtn.classList.add('secondary');
+    modeCheckBtn.classList.remove('secondary');
+    document.getElementById('checkEmailInput').value = '';
+    hide('checkErr');
+  }
+}
+
+async function checkStatusByEmail(){
+  const email = document.getElementById('checkEmailInput').value.trim();
+  const errEl = document.getElementById('checkErr');
+
+  if (!email){
+    errEl.textContent = 'Bitte gib deine E-Mail ein.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const req = await db.findExistingRequestForEmail(email);
+  if (!req){
+    errEl.textContent = 'Für diese E-Mail wurde keine Anfrage gefunden.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  localStorage.setItem('wl_myRequestId', req.id);
+  errEl.classList.add('hidden');
+  await checkStatus();
+}
+
 async function submitRequest(){
   const name = document.getElementById('nameInput').value.trim();
   const email = document.getElementById('emailInput').value.trim();
@@ -473,23 +597,24 @@ async function submitRequest(){
 
   const existing = await db.findExistingRequestForEmail(email);
   if (existing && (!existing.status || existing.status !== 'denied')) {
+    console.log('[submitRequest] Found existing request for email:', email, 'Status:', existing.status);
     localStorage.setItem('wl_myRequestId', existing.id);
-    errEl.textContent = 'Du hast bereits eine Anfrage gesendet. Bitte warte auf die Freigabe.';
-    errEl.classList.remove('hidden');
+    setRequestFeedback(getRequestStatusMessage(existing.status || 'pending'), false);
     await checkStatus();
     return;
   }
 
   errEl.classList.add('hidden');
+  console.log('[submitRequest] Sending new request for:', email);
   const id = await db.addRequest({ name, email, reason });
+  console.log('[submitRequest] Got ID from db.addRequest:', id);
   if (!id) {
     errEl.textContent = 'Es ist ein Fehler beim Senden aufgetreten. Bitte versuche es erneut.';
     errEl.classList.remove('hidden');
     return;
   }
   localStorage.setItem('wl_myRequestId', id);
-  errEl.textContent = 'Deine Anfrage wurde gesendet. Bitte warte auf die Freigabe.';
-  errEl.classList.remove('hidden');
+  setRequestFeedback('Deine Anfrage wurde erfolgreich gesendet. Bitte warte auf die Freigabe.', false);
   await checkStatus();
 }
 
@@ -498,6 +623,16 @@ async function renderItems(asAdmin){
   const items = await db.getItems();
   const grid = document.getElementById('itemsGrid');
   grid.innerHTML = '';
+
+  // Show reservation counter for users
+  if (!asAdmin) {
+    const myReserved = getMyReservedItems();
+    const counter = document.createElement('div');
+    counter.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 20px 0; font-size: 14px; color: var(--ink-soft); border-bottom: 1px solid rgba(91,71,99,.12); margin-bottom: 10px;';
+    counter.textContent = `Du hast ${myReserved.length} von 3 Artikeln ausgewählt`;
+    grid.appendChild(counter);
+  }
+
   items.forEach(item=>{
     const finalImage = item.image || getFallbackImage(item.color || '#C9D6EE');
     const el = document.createElement('div');
@@ -553,7 +688,46 @@ function spawnPetals(card){
 }
 
 async function reserve(id, newState){
-  await db.toggleReserved(id, newState);
+  if (!newState) {
+    // User is unreserving - just do it
+    await db.toggleReserved(id, false);
+    const myReserved = getMyReservedItems();
+    setMyReservedItems(myReserved.filter(rid => rid !== id));
+    await renderItems(false);
+    return;
+  }
+
+  // User wants to reserve (newState = true)
+  const myReserved = getMyReservedItems();
+  if (myReserved.length >= 3) {
+    // Already have 3, need to pick one to replace
+    const items = await db.getItems();
+    const reserved = items.filter(i => myReserved.includes(i.id));
+    
+    let swapId = prompt(
+      'Du kannst maximal 3 Artikel auswählen. Welchen möchtest du ersetzen?\n\n' +
+      reserved.map((i, idx) => `${idx + 1}. ${i.title}`).join('\n') +
+      '\n\n(Gib 1, 2 oder 3 ein, oder drücke Escape zum Abbrechen)'
+    );
+    
+    if (!swapId) return;
+    swapId = parseInt(swapId);
+    if (swapId < 1 || swapId > 3 || isNaN(swapId)) {
+      alert('Ungültige Eingabe.');
+      return;
+    }
+    
+    const oldId = reserved[swapId - 1].id;
+    await db.toggleReserved(oldId, false);
+    setMyReservedItems(myReserved.filter(rid => rid !== oldId));
+  }
+
+  await db.toggleReserved(id, true);
+  const updated = getMyReservedItems();
+  if (!updated.includes(id)) {
+    updated.push(id);
+    setMyReservedItems(updated);
+  }
   await renderItems(false);
 }
 
@@ -752,5 +926,11 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { resolveFirebaseConfig, shouldUseDemoMode, normalizeRequestData, normalizeItemInput };
+  module.exports = {
+    resolveFirebaseConfig,
+    shouldUseDemoMode,
+    normalizeRequestData,
+    normalizeItemInput,
+    getRequestStatusMessage
+  };
 }

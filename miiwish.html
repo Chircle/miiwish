@@ -31,13 +31,28 @@
 <div class="wrap">
 
   <div id="gateRequest" class="gate hidden">
-    <h2>Zugang anfragen</h2>
-    <p>Bitte gib deinen Namen und deine E-Mail an, damit ich deinen Zugriff prüfen kann.</p>
-    <input id="nameInput" type="text" placeholder="Dein Name" />
-    <input id="emailInput" type="email" placeholder="Deine E-Mail" />
-    <textarea id="reasonInput" rows="3" placeholder="Warum möchtest du Zugriff? (optional)"></textarea>
-    <button class="btn" onclick="submitRequest()">Anfrage senden</button>
-    <div id="requestErr" class="err hidden"></div>
+    <div style="display: flex; gap: 8px; margin-bottom: 20px; justify-content: center;">
+      <button class="btn small" id="modeNewBtn" onclick="setRequestMode('new')">Neue Anfrage</button>
+      <button class="btn small secondary" id="modeCheckBtn" onclick="setRequestMode('check')">Status checken</button>
+    </div>
+
+    <div id="modeNew">
+      <h2>Zugang anfragen</h2>
+      <p>Bitte gib deinen Namen und deine E-Mail an, damit ich deinen Zugriff prüfen kann.</p>
+      <input id="nameInput" type="text" placeholder="Dein Name" />
+      <input id="emailInput" type="email" placeholder="Deine E-Mail" />
+      <textarea id="reasonInput" rows="3" placeholder="Warum möchtest du Zugriff? (optional)"></textarea>
+      <button class="btn" onclick="submitRequest()">Anfrage senden</button>
+      <div id="requestErr" class="err hidden"></div>
+    </div>
+
+    <div id="modeCheck" class="hidden">
+      <h2>Mein Status checken</h2>
+      <p>Gib deine E-Mail ein um deinen Zugriffsstatus zu prüfen.</p>
+      <input id="checkEmailInput" type="email" placeholder="Deine E-Mail" />
+      <button class="btn" onclick="checkStatusByEmail()">Status abrufen</button>
+      <div id="checkErr" class="err hidden"></div>
+    </div>
   </div>
 
   <div id="gateWaiting" class="gate hidden">
@@ -50,6 +65,7 @@
   <div id="gateDenied" class="gate hidden">
     <h2>Zugang nicht gewährt</h2>
     <p>Für diese Wunschliste wurde dir kein Zugang gegeben.</p>
+    <button class="btn secondary" onclick="setRequestMode('check'); show('gateRequest'); hide('gateDenied');">Nochmal checken</button>
   </div>
 
   <section id="mainContent" class="items hidden">
@@ -57,11 +73,23 @@
   </section>
 
   <div id="adminArea" class="hidden">
-    <h2 class="section-title">Offene Anfragen</h2>
-    <div class="panel"><div id="requestsList"></div></div>
+    <nav class="admin-nav">
+      <ul>
+        <li><a href="#" onclick="scrollToSection('adminRequests', event)">Anfragen</a></li>
+        <li><a href="#" onclick="scrollToSection('adminScrape', event)">Hinzufügen</a></li>
+        <li><a href="#" onclick="scrollToSection('adminItems', event)">Verwalten</a></li>
+      </ul>
+    </nav>
 
-    <h2 class="section-title">Wunsch per Link hinzufügen</h2>
-    <div class="panel">
+    <div class="admin-content">
+      <section id="adminRequests">
+        <h2 class="section-title">Offene Anfragen</h2>
+        <div class="panel"><div id="requestsList"></div></div>
+      </section>
+
+      <section id="adminScrape">
+        <h2 class="section-title">Wunsch per Link hinzufügen</h2>
+        <div class="panel">
       <div class="scrape-row">
         <input id="scrapeUrlInput" type="text" placeholder="https://shop.beispiel.de/produkt/...">
         <button class="btn small" id="scrapeBtn" onclick="runScrape()">Daten abrufen</button>
@@ -93,9 +121,13 @@
         </div>
       </details>
     </div>
+      </section>
 
-    <h2 class="section-title">Meine Wünsche verwalten</h2>
-    <div class="panel"><div id="adminItemsList"></div></div>
+      <section id="adminItems">
+        <h2 class="section-title">Meine Wünsche verwalten</h2>
+        <div class="panel"><div id="adminItemsList"></div></div>
+      </section>
+    </div>
   </div>
 
   <footer class="foot">Miiwish · privat geteilt</footer>
