@@ -22,7 +22,7 @@ jobs:
 
       - name: Write Firebase config file
         run: |
-          cat > firebase-config.local.js <<EOF
+          cat > firebase-config.js <<EOF
           window.MIIWISH_FIREBASE_CONFIG = {
             apiKey: "${FIREBASE_API_KEY}",
             authDomain: "${FIREBASE_AUTH_DOMAIN}",
@@ -35,4 +35,4 @@ jobs:
 
       - name: Show generated file status
         run: |
-          ls -l firebase-config.local.js
+          ls -l firebase-config.js
