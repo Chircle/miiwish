@@ -125,6 +125,21 @@ function getRequestDocumentId(email){
   return `req-${normalized.replace(/[^a-z0-9]/g, '-')}`;
 }
 
+function resolveRequestDocumentId(email, uid = null){
+  if (uid) return uid;
+  return getRequestDocumentId(email);
+}
+
+async function ensureRequestUserSignedIn(){
+  if (!auth) return null;
+  if (auth.currentUser) return auth.currentUser;
+  if (auth.signInAnonymously) {
+    const result = await auth.signInAnonymously();
+    return result && result.user ? result.user : auth.currentUser;
+  }
+  return null;
+}
+
 function setRequestFeedback(message, isError = true){
   const errEl = document && document.getElementById ? document.getElementById('requestErr') : null;
   if (!errEl) return;
@@ -224,11 +239,12 @@ const db = {
       return matches[0];
     }
 
-    const docId = getRequestDocumentId(normalized);
-    const docRef = firestoreDb.collection('requests').doc(docId);
-    const docSnap = await docRef.get();
-    if (docSnap.exists) {
-      return { id: docSnap.id, ...docSnap.data() };
+    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
+    if (activeUser && activeUser.uid) {
+      const currentDoc = await firestoreDb.collection('requests').doc(activeUser.uid).get();
+      if (currentDoc.exists) {
+        return { id: currentDoc.id, ...currentDoc.data() };
+      }
     }
 
     const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
@@ -247,12 +263,14 @@ const db = {
       return;
     }
 
-    const docId = getRequestDocumentId(normalized);
-    const docRef = firestoreDb.collection('requests').doc(docId);
-    const docSnap = await docRef.get();
-    if (docSnap.exists) {
-      await docRef.update({ status });
-      return;
+    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
+    if (activeUser && activeUser.uid) {
+      const docRef = firestoreDb.collection('requests').doc(activeUser.uid);
+      const docSnap = await docRef.get();
+      if (docSnap.exists) {
+        await docRef.update({ status });
+        return;
+      }
     }
 
     const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
@@ -261,6 +279,9 @@ const db = {
   },
   async addRequest(data){
     const request = normalizeRequestData(data);
+    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
+    const currentUserId = activeUser ? activeUser.uid : null;
+    const docId = resolveRequestDocumentId(request.email, currentUserId);
     const existing = await this.findExistingRequestForEmail(request.email);
     if (existing) {
       const existingStatus = existing.status || 'pending';
@@ -268,7 +289,6 @@ const db = {
         return existing.id || existing.docId || null;
       }
 
-      const docId = existing.id || getRequestDocumentId(request.email);
       if (DEMO_MODE){
         const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
         const index = reqs.findIndex(r => r.id === docId);
@@ -279,21 +299,20 @@ const db = {
         }
       } else {
         const ref = firestoreDb.collection('requests').doc(docId);
-        await ref.set({ ...request, status: 'pending', ts: Date.now() }, { merge: true });
+        await ref.set({ ...request, uid: currentUserId || docId, status: 'pending', ts: Date.now() }, { merge: true });
         return docId;
       }
     }
 
     if (DEMO_MODE){
       const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-      const id = getRequestDocumentId(request.email) || 'req'+Date.now();
+      const id = docId || 'req'+Date.now();
       reqs.push({id, ...request, status:'pending', ts:Date.now()});
       localStorage.setItem('wl_requests', JSON.stringify(reqs));
       return id;
     }
-    const docId = getRequestDocumentId(request.email);
     const ref = firestoreDb.collection('requests').doc(docId);
-    await ref.set({ ...request, status: 'pending', ts: Date.now() });
+    await ref.set({ ...request, uid: currentUserId || docId, status: 'pending', ts: Date.now() });
     return docId;
   },
   async getRequestStatus(id){
@@ -644,6 +663,15 @@ async function submitRequest(){
 
   if (!name || !email){
     errEl.textContent = 'Bitte gib mindestens deinen Namen und deine E-Mail ein.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    await ensureRequestUserSignedIn();
+  } catch (error) {
+    console.error('[submitRequest] Anonymous sign-in failed:', error);
+    errEl.textContent = 'Die Anfrage konnte nicht gespeichert werden. Bitte versuche es noch einmal.';
     errEl.classList.remove('hidden');
     return;
   }
@@ -1033,6 +1061,7 @@ if (typeof module !== 'undefined' && module.exports) {
     normalizeItemInput,
     getRequestStatusMessage,
     getRequestDocumentId,
+    resolveRequestDocumentId,
     buildImageFallbackMarkup
   };
 }

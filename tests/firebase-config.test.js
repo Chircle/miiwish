@@ -146,12 +146,14 @@ test('getRequestPendingMessage clearly tells the user that a request was already
 });
 
 test('getRequestDocumentId is stable for the same email and keeps duplicate requests from being created', () => {
-  const { getRequestDocumentId } = loadScriptWithWindow({});
+  const { getRequestDocumentId, resolveRequestDocumentId } = loadScriptWithWindow({});
 
   const idA = getRequestDocumentId('  Max@example.com  ');
   const idB = getRequestDocumentId('max@example.com');
+  const uidId = resolveRequestDocumentId('max@example.com', 'uid-123');
 
   assert.equal(idA, idB);
+  assert.equal(uidId, 'uid-123');
   assert.ok(idA.length > 0);
 });
 
