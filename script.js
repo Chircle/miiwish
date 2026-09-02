@@ -557,11 +557,11 @@ function setMyReservedItems(ids){
 }
 
 function isAuthenticatedUser(){
-  return !!(auth && auth.currentUser);
+  return !!(auth && auth.currentUser && !auth.currentUser.isAnonymous);
 }
 
 function applyAdminState(user){
-  isAdmin = !!user;
+  isAdmin = !!(user && !user.isAnonymous);
   document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
 
   if (!isAdmin) {
