@@ -159,11 +159,6 @@ function setRequestFeedback(message, isError = true){
   }
 }
 
-function getFallbackImage(color = '#C9D6EE'){ 
-  const seed = encodeURIComponent(color.replace('#', ''));
-  return `https://picsum.photos/seed/miiwish-${seed}/800/600`;
-}
-
 function buildImageFallbackMarkup(color = '#C9D6EE'){ 
   return `<div class="image-fallback" style="background:${color}">kein Bild</div>`;
 }
@@ -195,7 +190,8 @@ const db = {
     normalized.color = PALETTE[Math.floor(Math.random()*PALETTE.length)];
     normalized.reserved = false;
     normalized.reservedBy = null;
-    normalized.image = normalized.image || getFallbackImage(normalized.color);
+    // Kein Bild gefunden -> Feld bewusst leer lassen. Das Grid zeigt dann
+    // die Pastellfarben-Kachel mit "kein Bild" statt eines Fake-Fotos.
     if (DEMO_MODE){
       const items = JSON.parse(localStorage.getItem('wl_items') || '[]');
       normalized.id = 'i'+Date.now();
