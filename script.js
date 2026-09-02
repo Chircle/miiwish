@@ -332,6 +332,14 @@ const db = {
     const doc = await firestoreDb.collection('requests').doc(id).get();
     return doc.exists ? doc.data().status : null;
   },
+  async getRequestData(id){
+    if (DEMO_MODE){
+      const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
+      return reqs.find(r=>r.id===id) || null;
+    }
+    const doc = await firestoreDb.collection('requests').doc(id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } : null;
+  },
   async setRequestStatus(id, status){
     if (DEMO_MODE){
       let reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
@@ -560,6 +568,37 @@ function isAuthenticatedUser(){
   return !!(auth && auth.currentUser && !auth.currentUser.isAnonymous);
 }
 
+/* Zeigt "Angemeldet als …" oben im Header. text=null blendet sie aus. */
+function setIdentityBar(text, options = {}){
+  const el = document.getElementById('identityBar');
+  if (!el) return;
+  if (!text) {
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    return;
+  }
+  let html = escapeHtml(text);
+  if (options.resetAction) {
+    html += ` · <a href="#" onclick="${options.resetAction}; return false;">${escapeHtml(options.resetLabel || 'Nicht du?')}</a>`;
+  }
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
+/* "Nicht du?"-Link: setzt nur die lokale Zuordnung dieses Browsers
+   zurück (nicht die Firestore-Anfrage selbst), damit sich auf einem
+   geteilten Gerät eine andere Person neu anfragen/einloggen kann. */
+function resetMyIdentity(){
+  const myReqId = localStorage.getItem('wl_myRequestId');
+  if (myReqId) localStorage.removeItem('wl_reserved_' + myReqId);
+  localStorage.removeItem('wl_myRequestId');
+  stopStatusPolling();
+  setIdentityBar(null);
+  hideAllGates();
+  show('gateRequest');
+  setRequestMode('new');
+}
+
 function applyAdminState(user){
   isAdmin = !!(user && !user.isAnonymous);
   document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
@@ -567,11 +606,12 @@ function applyAdminState(user){
   if (!isAdmin) {
     stopAdminPolling();
     const myReqId = localStorage.getItem('wl_myRequestId');
-    if (!myReqId){ hideAllGates(); show('gateRequest'); setRequestMode('new'); return; }
+    if (!myReqId){ setIdentityBar(null); hideAllGates(); show('gateRequest'); setRequestMode('new'); return; }
     checkStatus();
     return;
   }
 
+  setIdentityBar(`Angemeldet als ${user.email || 'Admin'}`);
   renderAdmin();
   startAdminPolling();
   hideAllGates();
@@ -604,6 +644,7 @@ async function init(){
   document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
 
   if (isAdmin){
+    setIdentityBar(`Angemeldet als ${auth.currentUser.email || 'Admin'}`);
     await renderAdmin();
     hideAllGates();
     show('mainContent'); show('adminArea');
@@ -621,21 +662,27 @@ async function checkStatus(){
   if (!myReqId){
     stopStatusPolling();
     setRequestFeedback('');
+    setIdentityBar(null);
     hideAllGates();
     show('gateRequest');
     return;
   }
 
-  const status = await db.getRequestStatus(myReqId);
+  const reqData = await db.getRequestData(myReqId);
+  const status = reqData ? reqData.status : null;
   hideAllGates();
 
   if (status === 'approved'){
     stopStatusPolling();
     setRequestFeedback('');
     show('mainContent');
+    const label = reqData.name ? `${reqData.name} (${reqData.email || ''})` : (reqData.email || '');
+    setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'resetMyIdentity()', resetLabel: 'Nicht du?' });
     await renderItems(false);
     return;
   }
+
+  setIdentityBar(null);
 
   if (status === 'declined'){
     stopStatusPolling();
@@ -653,10 +700,12 @@ async function refreshAfterApprovalCheck(){
   const myReqId = localStorage.getItem('wl_myRequestId');
   if (!myReqId) return;
 
-  const status = await db.getRequestStatus(myReqId);
-  if (status === 'approved') {
+  const reqData = await db.getRequestData(myReqId);
+  if (reqData && reqData.status === 'approved') {
     hideAllGates();
     show('mainContent');
+    const label = reqData.name ? `${reqData.name} (${reqData.email || ''})` : (reqData.email || '');
+    setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'resetMyIdentity()', resetLabel: 'Nicht du?' });
     await renderItems(false);
     stopStatusPolling();
   }

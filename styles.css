@@ -1,4 +1,4 @@
-  :root{
+:root{
     --blush:#F5D3DA; --periwinkle:#C9D6EE; --lavender:#D7C6E3;
     --gold:#E9C97D; --teal:#AFD3D3; --ink:#5B4763; --ink-soft:#8A7791; --paper:#FBF6F0;
   }
@@ -39,6 +39,16 @@
   .btn.small{ padding:8px 16px; font-size:12.5px; }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
   .admin-toggle{ position:relative; z-index:2; }
+
+  .identity-wrap{
+    position:relative; z-index:2;
+    display:flex; flex-direction:column; align-items:flex-end; gap:8px;
+  }
+  .identity-bar{
+    font-family:'Jost',sans-serif; font-size:12.5px; color:var(--ink);
+    opacity:.85; text-align:right; max-width:260px;
+  }
+  .identity-bar a{ text-decoration:underline; cursor:pointer; white-space:nowrap; }
 
   .wave{ position:relative; height:0; }
   .wave svg{ position:absolute; bottom:-1px; width:100%; height:70px; }
@@ -199,9 +209,6 @@
 
   .hidden{ display:none !important; }
   footer.foot{ text-align:center; font-size:12.5px; color:var(--ink-soft); padding:50px 0 30px; }
-  .foot-mark{ width:42px; height:42px; object-fit:cover; display:block; margin:0 auto 12px; border-radius:50%; box-shadow:0 8px 18px -12px rgba(91,71,99,.5); }
-  .privacy-note{ max-width:560px; margin:14px auto 0; font-size:11.5px; line-height:1.55; color:var(--ink-soft); }
-  .privacy-note strong{ color:var(--ink); font-weight:500; }
 
   @media (max-width:1000px){
     #adminArea{
