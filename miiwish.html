@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Miiwish</title>
+<link rel="icon" type="image/png" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Jost:wght@300;400;500&family=Petit+Formal+Script&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -136,7 +137,14 @@
     </div>
   </div>
 
-  <footer class="foot">Miiwish · privat geteilt</footer>
+  <footer class="foot">
+    <img class="foot-mark" src="favicon.png" alt="Miiwish">
+    <div>Miiwish · privat geteilt</div>
+    <p class="privacy-note"><strong>Datenschutz (vorläufig)</strong><br>
+      Diese private Wunschliste verarbeitet nur die Angaben, die du für eine Zugriffsanfrage eingibst.
+      Die Anwendung nutzt Firebase für Anmeldung und Speicherung. Es werden keine Daten zu Werbezwecken verkauft.
+      Dieser Hinweis ist eine vorläufige Information und ersetzt keine rechtliche Datenschutzerklärung.</p>
+  </footer>
 </div>
 
 <div id="adminModal" class="modal-backdrop hidden">

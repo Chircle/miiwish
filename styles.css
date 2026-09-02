@@ -199,6 +199,9 @@
 
   .hidden{ display:none !important; }
   footer.foot{ text-align:center; font-size:12.5px; color:var(--ink-soft); padding:50px 0 30px; }
+  .foot-mark{ width:42px; height:42px; object-fit:cover; display:block; margin:0 auto 12px; border-radius:50%; box-shadow:0 8px 18px -12px rgba(91,71,99,.5); }
+  .privacy-note{ max-width:560px; margin:14px auto 0; font-size:11.5px; line-height:1.55; color:var(--ink-soft); }
+  .privacy-note strong{ color:var(--ink); font-weight:500; }
 
   @media (max-width:1000px){
     #adminArea{

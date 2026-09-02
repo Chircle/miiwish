@@ -1,6 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------
+    // Globale Helper-Funktionen (auf Service-Ebene, überall nutzbar)
+    // ---------------------------------------------------------------
     function isSignedIn() {
       return request.auth != null;
     }
@@ -9,42 +13,115 @@ service cloud.firestore {
       return isSignedIn() && request.auth.token.admin == true;
     }
 
+    // Nur diese Felder wurden im Update geändert
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // ---------------------------------------------------------------
+    // items — die Wunschliste
+    // ---------------------------------------------------------------
     match /items/{itemId} {
+
+      // Sichtbar für alle (auch nicht eingeloggte Besucher),
+      // damit z.B. Reservierungsstatus global lesbar ist.
+      // Falls Titel/Beschreibung NICHT öffentlich sein sollen,
+      // hier stattdessen "if isSignedIn()" verwenden.
       allow read: if true;
 
-      // admin-only item management
+      // Nur Admin darf Items anlegen oder löschen
       allow create: if isAdmin();
       allow delete: if isAdmin();
 
-      // admins can update anything; users can only change their own reservation state
-      allow update: if isAdmin()
-        || (
-          isSignedIn()
-          && resource.data.reservedBy == request.auth.uid
-          && request.resource.data.reserved == false
-          && resource.data.reserved == true
+      allow update: if isSignedIn() && (
+        // Admin darf alles ändern
+        isAdmin()
+        ||
+        // Fall A: Nutzer gibt SEINE eigene Reservierung wieder frei
+        (
+          resource.data.reserved == true &&
+          resource.data.reservedBy == request.auth.uid &&
+          request.resource.data.reserved == false &&
+          request.resource.data.reservedBy == null &&
+          onlyChanged(['reserved', 'reservedBy'])
         )
-        || (
-          isSignedIn()
-          && request.resource.data.reserved == true
-          && request.resource.data.reservedBy == request.auth.uid
-          && resource.data.reserved == false
-        );
+        ||
+        // Fall B: Nutzer reserviert ein FREIES Item für sich selbst
+        (
+          resource.data.reserved == false &&
+          request.resource.data.reserved == true &&
+          request.resource.data.reservedBy == request.auth.uid &&
+          onlyChanged(['reserved', 'reservedBy']) &&
+          // Limit: max. 3 gleichzeitige Reservierungen pro Nutzer
+          // (setzt einen gepflegten Zähler in users/{uid} voraus, s.u.)
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.reservationCount < 3
+        )
+      );
     }
 
-    match /requests/{userId} {
-      allow read: if true;
+    // ---------------------------------------------------------------
+    // users — nur für den Reservierungszähler (kein Profildatenmodell)
+    // Wird transaktional zusammen mit dem items-Update geschrieben:
+    // Client muss reservationCount beim Reservieren +1 / beim
+    // Freigeben -1 rechnen und in DERSELBEN Batch-Write/Transaction
+    // mitschicken, sonst schlägt der items-Write fehl.
+    // ---------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
 
-      // user can only create their own request document
-      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId &&
+        request.resource.data.reservationCount == 0;
 
-      // user can resubmit only after the previous request was declined
-      allow update: if isSignedIn() && (
-        (request.auth.uid == userId && resource.data.status == 'declined')
-        || isAdmin()
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId &&
+        onlyChanged(['reservationCount']) &&
+        request.resource.data.reservationCount >= 0 &&
+        request.resource.data.reservationCount <= 3 &&
+        // Zähler darf sich pro Schreibvorgang nur um genau 1 ändern
+        (
+          request.resource.data.reservationCount == resource.data.reservationCount + 1 ||
+          request.resource.data.reservationCount == resource.data.reservationCount - 1
+        )
       );
 
-      allow delete: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if isAdmin();
+    }
+
+    // ---------------------------------------------------------------
+    // requests — Zugriffsanfragen (Doc-ID == uid, EIN Datenmodell)
+    // ---------------------------------------------------------------
+    match /requests/{userId} {
+
+      // Öffentlich lesbar wäre ein Datenschutzproblem (Name/E-Mail
+      // aller Anfragen). Besser: nur eigene Anfrage oder Admin.
+      // Falls Gäste ohne Login per E-Mail-Formular den Status prüfen
+      // sollen, das lieber über eine Cloud Function machen, die
+      // serverseitig (mit Admin-SDK) nur den Status zurückgibt.
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+
+      // Anfrage anlegen: nur die eigene UID als Doc-ID, Status muss
+      // 'pending' sein, Pflichtfelder müssen vorhanden sein.
+      allow create: if isSignedIn() && request.auth.uid == userId &&
+        request.resource.data.name is string &&
+        request.resource.data.email is string &&
+        request.resource.data.reason is string &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.ts is int;
+
+      allow update: if
+        // Admin darf Status setzen (approved/declined/pending etc.)
+        isAdmin()
+        ||
+        // Nutzer darf NUR erneut einreichen, wenn er abgelehnt wurde,
+        // und darf dabei nur wieder auf 'pending' zurücksetzen —
+        // keine Selbstfreigabe möglich.
+        (
+          isSignedIn() && request.auth.uid == userId &&
+          resource.data.status == 'declined' &&
+          request.resource.data.status == 'pending'
+        );
+
+      allow delete: if isAdmin();
     }
   }
 }
