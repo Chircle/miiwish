@@ -451,6 +451,23 @@ async function fetchMicrolinkPreview(url){
   };
 }
 
+/* Sortiert Bilder aus, die typischerweise KEIN Produktfoto sind, sondern
+   ein Website-/Sicherheits-Logo — z.B. wenn statt der echten Shop-Seite
+   eine Bot-Block-Seite (Akamai, Cloudflare o.ä.) ausgelesen wurde.
+   Heuristik: SVGs sind auf Shop-Seiten praktisch nie das Produktfoto,
+   und "logo" im Dateinamen/Pfad ist ein starkes Signal. */
+function isLikelyLogoOrPlaceholder(url){
+  if (!url) return true;
+  const lower = url.toLowerCase();
+  if (lower.includes('.svg')) return true;
+  if (/logo/.test(lower)) return true;
+  return false;
+}
+
+function sanitizeScrapedImage(url){
+  return isLikelyLogoOrPlaceholder(url) ? '' : url;
+}
+
 async function scrapeUrl(url){
   let title = '', image = '', description = '', price = '', titleFromUrl = false;
 
@@ -461,7 +478,7 @@ async function scrapeUrl(url){
     title = getMeta(doc, ['meta[property="og:title"]','meta[name="twitter:title"]','meta[name="title"]','title']);
     image = getMeta(doc, ['meta[property="og:image"]','meta[name="twitter:image"]']);
     if (!image) image = findFirstImage(doc, url);
-    if (image) image = normalizeImageUrl(image, url);
+    if (image) image = sanitizeScrapedImage(normalizeImageUrl(image, url));
     description = getMeta(doc, ['meta[property="og:description"]','meta[name="description"]']).slice(0,150);
     price = getMeta(doc, ['meta[property="product:price:amount"]','meta[property="og:price:amount"]','meta[itemprop="price"]']);
     if (!price) price = findPriceFromJsonLd(doc);
@@ -476,7 +493,7 @@ async function scrapeUrl(url){
     try {
       const preview = await fetchMicrolinkPreview(url);
       if (!title && preview.title) title = preview.title;
-      if (!image && preview.image) image = normalizeImageUrl(preview.image, url);
+      if (!image && preview.image) image = sanitizeScrapedImage(normalizeImageUrl(preview.image, url));
       if (!description && preview.description) description = preview.description.slice(0,150);
     } catch (error) {
       // Beide Wege fehlgeschlagen -> unten greift der URL-Titel-Fallback,
