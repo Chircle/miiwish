@@ -422,23 +422,65 @@ function deriveTitleFromUrl(url){
   } catch(e){ return ''; }
 }
 
-async function scrapeUrl(url){
-  const html = await fetchPageHtml(url);
-  const doc = new DOMParser().parseFromString(html, 'text/html');
+/* Fallback-Quelle für Vorschaubilder: Microlink rendert die Zielseite
+   serverseitig mit einem echten Browser und liefert Titel/Bild/
+   Beschreibung als JSON zurück. Das umgeht viele Bot-Sperren (u.a. bei
+   Amazon), die die direkten CORS-Proxys oben nicht schaffen.
+   Kostenloses Kontingent ohne API-Key reicht für eine private
+   Wunschliste locker aus; bei Bedarf kann man &apiKey=... anhängen
+   (siehe microlink.io/docs) für ein höheres Limit. */
+async function fetchMicrolinkPreview(url){
+  const endpoint = `https://api.microlink.io/?url=${encodeURIComponent(url)}&palette=false`;
+  const res = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`Microlink HTTP ${res.status}`);
+  const json = await res.json();
+  if (!json || json.status !== 'success' || !json.data) throw new Error('Microlink: keine Daten erhalten');
+  const d = json.data;
+  return {
+    title: d.title || '',
+    image: (d.image && d.image.url) || (d.logo && d.logo.url) || '',
+    description: d.description || ''
+  };
+}
 
-  let title = getMeta(doc, ['meta[property="og:title"]','meta[name="twitter:title"]','meta[name="title"]','title']);
-  let titleFromUrl = false;
-  if (!title){
+async function scrapeUrl(url){
+  let title = '', image = '', description = '', price = '', titleFromUrl = false;
+
+  try {
+    const html = await fetchPageHtml(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    title = getMeta(doc, ['meta[property="og:title"]','meta[name="twitter:title"]','meta[name="title"]','title']);
+    image = getMeta(doc, ['meta[property="og:image"]','meta[name="twitter:image"]']);
+    if (!image) image = findFirstImage(doc, url);
+    if (image) image = normalizeImageUrl(image, url);
+    description = getMeta(doc, ['meta[property="og:description"]','meta[name="description"]']).slice(0,150);
+    price = getMeta(doc, ['meta[property="product:price:amount"]','meta[property="og:price:amount"]','meta[itemprop="price"]']);
+    if (!price) price = findPriceFromJsonLd(doc);
+  } catch (error) {
+    // Direktes Auslesen (auch über die CORS-Proxys) ist fehlgeschlagen,
+    // z.B. weil der Shop Bots/Proxys aktiv blockt (typisch bei Amazon).
+    // Der Microlink-Fallback unten übernimmt in dem Fall komplett.
+  }
+
+  // Fehlt noch Titel oder Bild, zusätzlich über Microlink versuchen.
+  if (!title || !image) {
+    try {
+      const preview = await fetchMicrolinkPreview(url);
+      if (!title && preview.title) title = preview.title;
+      if (!image && preview.image) image = normalizeImageUrl(preview.image, url);
+      if (!description && preview.description) description = preview.description.slice(0,150);
+    } catch (error) {
+      // Beide Wege fehlgeschlagen -> unten greift der URL-Titel-Fallback,
+      // Bild/Beschreibung/Preis bleiben leer und werden im Admin-Panel
+      // als "manuell ergänzen" markiert.
+    }
+  }
+
+  if (!title) {
     title = deriveTitleFromUrl(url);
     titleFromUrl = !!title;
   }
-  let image = getMeta(doc, ['meta[property="og:image"]','meta[name="twitter:image"]']);
-  if (!image) image = findFirstImage(doc, url);
-  image = normalizeImageUrl(image, url);
-  let description = getMeta(doc, ['meta[property="og:description"]','meta[name="description"]']);
-  description = description.slice(0,150);
-  let price = getMeta(doc, ['meta[property="product:price:amount"]','meta[property="og:price:amount"]','meta[itemprop="price"]']);
-  if (!price) price = findPriceFromJsonLd(doc);
 
   return { title: title || url, image, description, price, url, titleFromUrl };
 }
@@ -938,6 +980,7 @@ async function runScrape(){
   try{
     const data = await scrapeUrl(url);
     lastScraped = data;
+    const previewColor = PALETTE[Math.floor(Math.random()*PALETTE.length)];
     const previewImage = data.image || '';
     const previewImgEl = document.getElementById('previewImg');
     const previewFallbackEl = document.getElementById('previewImgFallback');
@@ -950,7 +993,7 @@ async function runScrape(){
         previewImgEl.onerror = () => {
           previewImgEl.style.display = 'none';
           if (previewFallbackEl) {
-            previewFallbackEl.style.background = '#D7C6E3';
+            previewFallbackEl.style.background = previewColor;
             previewFallbackEl.textContent = 'kein Bild';
             previewFallbackEl.classList.remove('hidden');
           }
@@ -958,7 +1001,7 @@ async function runScrape(){
       } else {
         previewImgEl.style.display = 'none';
         if (previewFallbackEl) {
-          previewFallbackEl.style.background = '#D7C6E3';
+          previewFallbackEl.style.background = previewColor;
           previewFallbackEl.textContent = 'kein Bild';
           previewFallbackEl.classList.remove('hidden');
         }
@@ -985,7 +1028,7 @@ async function runScrape(){
     const previewFallbackEl = document.getElementById('previewImgFallback');
     if (previewImgEl) previewImgEl.style.display = 'none';
     if (previewFallbackEl) {
-      previewFallbackEl.style.background = '#D7C6E3';
+      previewFallbackEl.style.background = PALETTE[Math.floor(Math.random()*PALETTE.length)];
       previewFallbackEl.textContent = 'kein Bild';
       previewFallbackEl.classList.remove('hidden');
     }
