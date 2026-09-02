@@ -145,6 +145,16 @@ test('getRequestPendingMessage clearly tells the user that a request was already
   assert.equal(getRequestStatusMessage(null), '');
 });
 
+test('getRequestDocumentId is stable for the same email and keeps duplicate requests from being created', () => {
+  const { getRequestDocumentId } = loadScriptWithWindow({});
+
+  const idA = getRequestDocumentId('  Max@example.com  ');
+  const idB = getRequestDocumentId('max@example.com');
+
+  assert.equal(idA, idB);
+  assert.ok(idA.length > 0);
+});
+
 test('buildImageFallbackMarkup creates a pastel placeholder with the no-image label', () => {
   const { buildImageFallbackMarkup } = loadScriptWithWindow({});
 

@@ -119,6 +119,12 @@ function getRequestStatusMessage(status){
   return '';
 }
 
+function getRequestDocumentId(email){
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return '';
+  return `req-${normalized.replace(/[^a-z0-9]/g, '-')}`;
+}
+
 function setRequestFeedback(message, isError = true){
   const errEl = document && document.getElementById ? document.getElementById('requestErr') : null;
   if (!errEl) return;
@@ -212,16 +218,23 @@ const db = {
 
     if (DEMO_MODE){
       const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-      const existing = reqs.find(r => String(r.email || '').toLowerCase() === normalized && (!r.status || r.status !== 'denied'));
-      return existing ? existing : null;
+      const matches = reqs.filter(r => String(r.email || '').toLowerCase() === normalized);
+      if (!matches.length) return null;
+      matches.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+      return matches[0];
+    }
+
+    const docId = getRequestDocumentId(normalized);
+    const docRef = firestoreDb.collection('requests').doc(docId);
+    const docSnap = await docRef.get();
+    if (docSnap.exists) {
+      return { id: docSnap.id, ...docSnap.data() };
     }
 
     const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
-    const existing = snap.docs.find(doc => {
-      const data = doc.data();
-      return !data.status || data.status !== 'denied';
-    });
-    return existing ? { id: existing.id, ...existing.data() } : null;
+    if (!snap.docs.length) return null;
+    const sorted = [...snap.docs].sort((a, b) => Number(b.data().ts || 0) - Number(a.data().ts || 0));
+    return { id: sorted[0].id, ...sorted[0].data() };
   },
   async setExistingRequestStatusByEmail(email, status){
     const normalized = String(email || '').trim().toLowerCase();
@@ -234,6 +247,14 @@ const db = {
       return;
     }
 
+    const docId = getRequestDocumentId(normalized);
+    const docRef = firestoreDb.collection('requests').doc(docId);
+    const docSnap = await docRef.get();
+    if (docSnap.exists) {
+      await docRef.update({ status });
+      return;
+    }
+
     const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
     const tasks = snap.docs.map(doc => firestoreDb.collection('requests').doc(doc.id).update({ status }));
     await Promise.all(tasks);
@@ -241,19 +262,39 @@ const db = {
   async addRequest(data){
     const request = normalizeRequestData(data);
     const existing = await this.findExistingRequestForEmail(request.email);
-    if (existing && (!existing.status || existing.status !== 'denied')) {
-      return existing.id || existing.docId || null;
+    if (existing) {
+      const existingStatus = existing.status || 'pending';
+      if (existingStatus !== 'denied') {
+        return existing.id || existing.docId || null;
+      }
+
+      const docId = existing.id || getRequestDocumentId(request.email);
+      if (DEMO_MODE){
+        const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
+        const index = reqs.findIndex(r => r.id === docId);
+        if (index >= 0) {
+          reqs[index] = { ...reqs[index], ...request, status: 'pending', ts: Date.now() };
+          localStorage.setItem('wl_requests', JSON.stringify(reqs));
+          return reqs[index].id;
+        }
+      } else {
+        const ref = firestoreDb.collection('requests').doc(docId);
+        await ref.set({ ...request, status: 'pending', ts: Date.now() }, { merge: true });
+        return docId;
+      }
     }
 
     if (DEMO_MODE){
       const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-      const id = 'req'+Date.now();
+      const id = getRequestDocumentId(request.email) || 'req'+Date.now();
       reqs.push({id, ...request, status:'pending', ts:Date.now()});
       localStorage.setItem('wl_requests', JSON.stringify(reqs));
       return id;
     }
-    const ref = await firestoreDb.collection('requests').add({ ...request, status:'pending', ts: Date.now() });
-    return ref.id;
+    const docId = getRequestDocumentId(request.email);
+    const ref = firestoreDb.collection('requests').doc(docId);
+    await ref.set({ ...request, status: 'pending', ts: Date.now() });
+    return docId;
   },
   async getRequestStatus(id){
     if (DEMO_MODE){
@@ -991,6 +1032,7 @@ if (typeof module !== 'undefined' && module.exports) {
     normalizeRequestData,
     normalizeItemInput,
     getRequestStatusMessage,
+    getRequestDocumentId,
     buildImageFallbackMarkup
   };
 }
