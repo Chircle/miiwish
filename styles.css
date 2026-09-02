@@ -80,12 +80,15 @@
     border-radius: 58% 42% 50% 50% / 12% 12% 6% 6%;
     display:block;
   }
-  .item .thumb-fallback{
+  .item .thumb-fallback,
+  .image-fallback{
     width:100%; aspect-ratio:4/3;
     border-radius: 58% 42% 50% 50% / 12% 12% 6% 6%;
     display:flex; align-items:center; justify-content:center;
     font-family:'Cormorant Garamond', serif; font-style:italic; color:rgba(255,255,255,.85); font-size:20px;
   }
+  .image-fallback{
+    width:100%; max-width:220px; height:150px; border-radius:14px; font-size:18px; }
   .item .body{ padding:20px 22px 24px; }
   .item h3{ font-size:19px; margin-bottom:6px; padding-right:70px;}
   .item .price{ font-family:'Cormorant Garamond',serif; font-style:italic; color:var(--ink-soft); font-size:15px; margin-bottom:8px;}
@@ -117,7 +120,9 @@
   .scrape-row input{ flex:1; min-width:220px; padding:11px 14px; border:1px solid rgba(91,71,99,.25); border-radius:10px; font-family:inherit; font-size:14px;}
   .scrape-status{ font-size:13px; color:var(--ink-soft); margin-bottom:14px; min-height:18px; }
   .preview-grid{ display:grid; grid-template-columns:minmax(160px,220px) minmax(0,1fr); gap:18px; align-items:start; margin-bottom:18px; }
+  .preview-media{ position:relative; width:100%; max-width:220px; }
   .preview-grid img{ width:100%; max-width:220px; height:150px; object-fit:cover; border-radius:14px; background:var(--periwinkle); display:block; }
+  .preview-grid .image-fallback{ width:100%; max-width:220px; height:150px; border-radius:14px; font-size:18px; }
   .preview-fields{ display:grid; gap:10px; width:100%; min-width:0; }
   .preview-fields input, .preview-fields textarea{
     padding:11px 12px; border:1px solid rgba(91,71,99,.25); border-radius:10px; font-family:inherit; font-size:14px; width:100%; min-height:42px;
@@ -129,6 +134,8 @@
   .request-row:last-child, .item-admin-row:last-child{ border-bottom:none; }
   .item-admin-row .meta-mini{ display:flex; align-items:center; gap:12px; }
   .item-admin-row img{ width:44px; height:36px; object-fit:cover; border-radius:8px; }
+  .item-admin-row .thumb-fallback,
+  .item-admin-row .image-fallback{ width:44px; height:36px; border-radius:8px; font-size:12px; flex-shrink:0; }
   .actions{ display:flex; gap:8px; }
 
   .modal-backdrop{ position:fixed; inset:0; background:rgba(91,71,99,.35); display:flex; align-items:center; justify-content:center; z-index:100;}

@@ -143,6 +143,18 @@ function getFallbackImage(color = '#C9D6EE'){
   return `https://picsum.photos/seed/miiwish-${seed}/800/600`;
 }
 
+function buildImageFallbackMarkup(color = '#C9D6EE'){ 
+  return `<div class="image-fallback" style="background:${color}">kein Bild</div>`;
+}
+
+function buildImageFallbackElement(color = '#C9D6EE'){ 
+  const el = document.createElement('div');
+  el.className = 'image-fallback';
+  el.style.background = color;
+  el.textContent = 'kein Bild';
+  return el;
+}
+
 function seedDemoIfNeeded(){
   if (localStorage.getItem('wl_items') === null) localStorage.setItem('wl_items', JSON.stringify(DEMO_ITEMS));
   if (localStorage.getItem('wl_requests') === null) localStorage.setItem('wl_requests', JSON.stringify(DEMO_REQUESTS));
@@ -634,14 +646,15 @@ async function renderItems(asAdmin){
   }
 
   items.forEach(item=>{
-    const finalImage = item.image || getFallbackImage(item.color || '#C9D6EE');
+    const finalImage = item.image || '';
+    const color = item.color || '#C9D6EE';
     const el = document.createElement('div');
     el.className = 'item' + (!asAdmin && item.reserved ? ' is-reserved' : '');
     el.innerHTML = `
       ${!asAdmin && item.reserved ? '<div class="reserved-tag">reserviert</div>' : ''}
       ${finalImage
-        ? `<img class="thumb" src="${escapeAttr(finalImage)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(item.color||'#C9D6EE')}'))">`
-        : fallbackThumbHtml(item.color||'#C9D6EE')}
+        ? `<img class="thumb" src="${escapeAttr(finalImage)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(color)}'))">`
+        : fallbackThumbHtml(color)}
       <div class="body">
         <h3>${escapeHtml(item.title)}</h3>
         ${item.price ? `<div class="price">${escapeHtml(item.price)}</div>` : ''}
@@ -660,14 +673,26 @@ async function renderItems(asAdmin){
   if (!items.length) grid.innerHTML = '<p class="empty-note">Noch keine Wünsche eingetragen.</p>';
 }
 function fallbackThumbHtml(color){
-  return `<div class="thumb-fallback" style="background:${color}">kein Bild</div>`;
+  return buildImageFallbackMarkup(color);
 }
 function fallbackThumb(color){
-  const d = document.createElement('div');
-  d.className='thumb-fallback';
-  d.style.background = color;
-  d.textContent = 'kein Bild';
-  return d;
+  return buildImageFallbackElement(color);
+}
+function showImageFallback(elementId, color = '#D7C6E3'){
+  const imgEl = document.getElementById(elementId);
+  const fallbackEl = document.getElementById(elementId + 'Fallback');
+  if (!imgEl || !fallbackEl) return;
+  imgEl.style.display = 'none';
+  fallbackEl.style.background = color;
+  fallbackEl.textContent = 'kein Bild';
+  fallbackEl.classList.remove('hidden');
+}
+function clearImageFallback(elementId){
+  const imgEl = document.getElementById(elementId);
+  const fallbackEl = document.getElementById(elementId + 'Fallback');
+  if (!imgEl || !fallbackEl) return;
+  fallbackEl.classList.add('hidden');
+  imgEl.style.display = 'block';
 }
 
 function spawnPetals(card){
@@ -759,9 +784,13 @@ async function renderAdmin(){
   items.forEach(item=>{
     const row = document.createElement('div');
     row.className='item-admin-row';
+    const color = item.color || '#C9D6EE';
+    const imageMarkup = item.image
+      ? `<img src="${escapeAttr(item.image)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(color)}'))">`
+      : fallbackThumbHtml(color);
     row.innerHTML = `
       <div class="meta-mini">
-        ${item.image ? `<img src="${escapeAttr(item.image)}" alt="">` : ''}
+        ${imageMarkup}
         <div>
           <div>${escapeHtml(item.title)}</div>
           <div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(item.price||'')}</div>
@@ -797,9 +826,32 @@ async function runScrape(){
   try{
     const data = await scrapeUrl(url);
     lastScraped = data;
-    const previewImage = data.image || getFallbackImage('#C9D6EE');
-    document.getElementById('previewImg').src = previewImage;
-    document.getElementById('previewImg').style.display = 'block';
+    const previewImage = data.image || '';
+    const previewImgEl = document.getElementById('previewImg');
+    const previewFallbackEl = document.getElementById('previewImgFallback');
+    if (previewImgEl) previewImgEl.onerror = null;
+    if (previewFallbackEl) previewFallbackEl.classList.add('hidden');
+    if (previewImgEl) {
+      previewImgEl.style.display = 'block';
+      if (previewImage) {
+        previewImgEl.src = previewImage;
+        previewImgEl.onerror = () => {
+          previewImgEl.style.display = 'none';
+          if (previewFallbackEl) {
+            previewFallbackEl.style.background = '#D7C6E3';
+            previewFallbackEl.textContent = 'kein Bild';
+            previewFallbackEl.classList.remove('hidden');
+          }
+        };
+      } else {
+        previewImgEl.style.display = 'none';
+        if (previewFallbackEl) {
+          previewFallbackEl.style.background = '#D7C6E3';
+          previewFallbackEl.textContent = 'kein Bild';
+          previewFallbackEl.classList.remove('hidden');
+        }
+      }
+    }
     document.getElementById('previewTitle').value = data.title || '';
     document.getElementById('previewPrice').value = data.price || '';
     document.getElementById('previewDesc').value = data.description || '';
@@ -817,7 +869,14 @@ async function runScrape(){
   } catch(e){
     const guessedTitle = deriveTitleFromUrl(url);
     lastScraped = { url, title: guessedTitle, image:'', price:'', description:'' };
-    document.getElementById('previewImg').style.display='none';
+    const previewImgEl = document.getElementById('previewImg');
+    const previewFallbackEl = document.getElementById('previewImgFallback');
+    if (previewImgEl) previewImgEl.style.display = 'none';
+    if (previewFallbackEl) {
+      previewFallbackEl.style.background = '#D7C6E3';
+      previewFallbackEl.textContent = 'kein Bild';
+      previewFallbackEl.classList.remove('hidden');
+    }
     document.getElementById('previewTitle').value = guessedTitle;
     document.getElementById('previewPrice').value = '';
     document.getElementById('previewDesc').value = '';
@@ -931,6 +990,7 @@ if (typeof module !== 'undefined' && module.exports) {
     shouldUseDemoMode,
     normalizeRequestData,
     normalizeItemInput,
-    getRequestStatusMessage
+    getRequestStatusMessage,
+    buildImageFallbackMarkup
   };
 }

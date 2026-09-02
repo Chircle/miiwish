@@ -144,3 +144,13 @@ test('getRequestPendingMessage clearly tells the user that a request was already
   assert.equal(getRequestStatusMessage('denied'), 'Dein Zugang wurde nicht freigegeben.');
   assert.equal(getRequestStatusMessage(null), '');
 });
+
+test('buildImageFallbackMarkup creates a pastel placeholder with the no-image label', () => {
+  const { buildImageFallbackMarkup } = loadScriptWithWindow({});
+
+  const markup = buildImageFallbackMarkup('#D7C6E3');
+
+  assert.match(markup, /kein Bild/i);
+  assert.match(markup, /D7C6E3|#D7C6E3/);
+  assert.match(markup, /image-fallback/i);
+});

@@ -13,10 +13,11 @@
 </head>
 <body>
 
+<!--
 <div id="demoBanner" class="demo-banner hidden">
   Vorschau-Modus mit Beispieldaten — noch nicht mit Firebase verbunden. <button onclick="dismissBanner()">Ausblenden</button>
 </div>
-
+-->
 <header class="hero">
   <div id="starField"></div>
   <div class="intro">
@@ -69,12 +70,14 @@
   </div>
 
   <section id="mainContent" class="items hidden">
+    <h2 class="section-title">Wünsche</h2>
     <div id="itemsGrid" class="grid"></div>
   </section>
 
   <div id="adminArea" class="hidden">
     <nav class="admin-nav">
       <ul>
+        <li><a href="#" onclick="scrollToSection('itemsGrid', event)">Wünsche</a></li>
         <li><a href="#" onclick="scrollToSection('adminRequests', event)">Anfragen</a></li>
         <li><a href="#" onclick="scrollToSection('adminScrape', event)">Hinzufügen</a></li>
         <li><a href="#" onclick="scrollToSection('adminItems', event)">Verwalten</a></li>
@@ -98,7 +101,10 @@
 
       <div id="previewBox" class="hidden">
         <div class="preview-grid">
-          <img id="previewImg" src="" alt="">
+          <div class="preview-media">
+            <img id="previewImg" src="" alt="">
+            <div id="previewImgFallback" class="image-fallback hidden" style="background:#D7C6E3;">kein Bild</div>
+          </div>
           <div class="preview-fields">
             <input id="previewTitle" type="text" placeholder="Titel">
             <input id="previewPrice" type="text" placeholder="Preis (z. B. 39,90 €)">
