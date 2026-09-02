@@ -112,7 +112,7 @@ function getRequestStatusMessage(status){
     return 'Dein Zugriff wurde freigegeben. Du kannst deine Wunschliste jetzt sehen.';
   }
 
-  if (status === 'denied') {
+  if (status === 'declined') {
     return 'Dein Zugang wurde nicht freigegeben.';
   }
 
@@ -293,7 +293,7 @@ const db = {
     const existing = await this.findExistingRequestForEmail(request.email);
     if (existing) {
       const existingStatus = existing.status || 'pending';
-      if (existingStatus !== 'denied') {
+      if (existingStatus !== 'declined') {
         return existing.id || existing.docId || null;
       }
 
@@ -595,9 +595,9 @@ async function checkStatus(){
     return;
   }
 
-  if (status === 'denied'){
+  if (status === 'declined'){
     stopStatusPolling();
-    setRequestFeedback(getRequestStatusMessage('denied'));
+    setRequestFeedback(getRequestStatusMessage('declined'));
     show('gateDenied');
     return;
   }
@@ -685,7 +685,7 @@ async function submitRequest(){
   }
 
   const existing = await db.findExistingRequestForEmail(email);
-  if (existing && (!existing.status || existing.status !== 'denied')) {
+  if (existing && (!existing.status || existing.status !== 'declined')) {
     console.log('[submitRequest] Found existing request for email:', email, 'Status:', existing.status);
     localStorage.setItem('wl_myRequestId', existing.id);
     setRequestFeedback(getRequestStatusMessage(existing.status || 'pending'), false);
@@ -834,6 +834,36 @@ async function reserve(id, newState){
 }
 
 /* Admin */
+/* Erkennung möglicher Umgehungsversuche: gleicher Name oder gleicher
+   E-Mail-Local-Part (Teil vor dem @) wie bei einer bereits ABGELEHNTEN
+   Anfrage, aber mit anderer Domain/TLD (z.B. "oma@gmail.com" vs.
+   "oma@gmail.de"). Blockiert nichts automatisch, warnt den Admin nur. */
+function emailLocalPart(email){
+  const normalized = String(email || '').trim().toLowerCase();
+  const at = normalized.indexOf('@');
+  return at > 0 ? normalized.slice(0, at) : normalized;
+}
+
+function normalizeNameForCompare(name){
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function findSimilarDeclinedRequest(candidate, allRequests){
+  const candName = normalizeNameForCompare(candidate.name);
+  const candLocal = emailLocalPart(candidate.email);
+  const candEmail = String(candidate.email || '').trim().toLowerCase();
+
+  return allRequests.find(other => {
+    if (other.id === candidate.id) return false;
+    if (other.status !== 'declined') return false;
+    const otherEmail = String(other.email || '').trim().toLowerCase();
+    if (otherEmail === candEmail) return false; // exakt gleiche Mail -> kein neuer Fall, sondern Resubmit
+    const sameName = candName && normalizeNameForCompare(other.name) === candName;
+    const sameLocalPart = candLocal && emailLocalPart(other.email) === candLocal;
+    return sameName || sameLocalPart;
+  });
+}
+
 async function renderAdmin(){
   const reqs = await db.getRequests();
   const list = document.getElementById('requestsList');
@@ -842,15 +872,20 @@ async function renderAdmin(){
   pending.forEach(r=>{
     const row = document.createElement('div');
     row.className='request-row';
+    const similar = findSimilarDeclinedRequest(r, reqs);
+    const warningMarkup = similar
+      ? `<div style="font-size:12px;color:#A24A63;margin-top:4px;">⚠️ Ähnlich zu einer bereits abgelehnten Anfrage: <strong>${escapeHtml(similar.name)}</strong>${similar.email ? ` (${escapeHtml(similar.email)})` : ''}</div>`
+      : '';
     row.innerHTML = `
       <div>
         <div><strong>${escapeHtml(r.name)}</strong></div>
         ${r.email ? `<div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(r.email)}</div>` : ''}
         ${r.reason ? `<div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(r.reason)}</div>` : ''}
+        ${warningMarkup}
       </div>
       <span class="actions">
         <button class="btn small" onclick="respondRequest('${r.id}','approved')">Freigeben</button>
-        <button class="btn small secondary" onclick="respondRequest('${r.id}','denied')">Ablehnen</button>
+        <button class="btn small secondary" onclick="respondRequest('${r.id}','declined')">Ablehnen</button>
       </span>`;
     list.appendChild(row);
   });
