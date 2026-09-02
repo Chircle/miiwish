@@ -133,7 +133,7 @@
   .preview-grid{ display:grid; grid-template-columns:minmax(160px,220px) minmax(0,1fr); gap:18px; align-items:start; margin-bottom:18px; }
   .preview-media{ position:relative; width:100%; max-width:220px; }
   .preview-grid img{ width:100%; max-width:220px; height:150px; object-fit:cover; border-radius:14px; background:var(--periwinkle); display:block; }
-  .preview-grid .image-fallback{ width:100%; max-width:220px; height:150px; border-radius:14px; font-size:18px; }
+  .preview-grid .image-fallback{ width:100%; height:150px; border-radius:14px; font-size:18px; }
   .preview-fields{ display:grid; gap:10px; width:100%; min-width:0; }
   .preview-fields input, .preview-fields textarea{
     padding:11px 12px; border:1px solid rgba(91,71,99,.25); border-radius:10px; font-family:inherit; font-size:14px; width:100%; min-height:42px;
