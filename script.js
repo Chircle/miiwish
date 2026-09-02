@@ -442,7 +442,11 @@ async function fetchMicrolinkPreview(url){
   const d = json.data;
   return {
     title: d.title || '',
-    image: (d.image && d.image.url) || (d.logo && d.logo.url) || '',
+    // Bewusst NUR d.image, nicht d.logo: wenn der Zielshop den Request
+    // blockt (z.B. Amazon-Bot-Schutz), liefert Microlink oft nur das
+    // Logo der Block-/Security-Seite (z.B. Akamai) als "logo" zurück —
+    // das ist kein Produktbild und würde nur verwirren.
+    image: (d.image && d.image.url) || '',
     description: d.description || ''
   };
 }
