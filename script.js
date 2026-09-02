@@ -112,7 +112,7 @@ function getRequestStatusMessage(status){
     return 'Dein Zugriff wurde freigegeben. Du kannst deine Wunschliste jetzt sehen.';
   }
 
-  if (status === 'declined' || status === 'denied') {
+  if (status === 'denied') {
     return 'Dein Zugang wurde nicht freigegeben.';
   }
 
@@ -194,6 +194,7 @@ const db = {
     const normalized = normalizeItemInput(item);
     normalized.color = PALETTE[Math.floor(Math.random()*PALETTE.length)];
     normalized.reserved = false;
+    normalized.reservedBy = null;
     normalized.image = normalized.image || getFallbackImage(normalized.color);
     if (DEMO_MODE){
       const items = JSON.parse(localStorage.getItem('wl_items') || '[]');
@@ -216,11 +217,18 @@ const db = {
   async toggleReserved(id, reserved){
     if (DEMO_MODE){
       let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
-      items = items.map(i=> i.id===id ? {...i, reserved} : i);
+      items = items.map(i=> i.id===id ? {...i, reserved, reservedBy: reserved ? 'demo-user' : null} : i);
       localStorage.setItem('wl_items', JSON.stringify(items));
       return;
     }
-    await firestoreDb.collection('items').doc(id).update({reserved});
+    // Wer reserviert, muss dafür (anonym) eingeloggt sein — sonst kann
+    // die Firestore-Regel nicht prüfen, wem die Reservierung gehört.
+    const user = await ensureRequestUserSignedIn();
+    const reservedBy = reserved ? (user ? user.uid : null) : null;
+    if (reserved && !reservedBy) {
+      throw new Error('Anmeldung für Reservierung fehlgeschlagen.');
+    }
+    await firestoreDb.collection('items').doc(id).update({reserved, reservedBy});
   },
   async getRequests(){
     if (DEMO_MODE) return JSON.parse(localStorage.getItem('wl_requests') || '[]');
@@ -239,12 +247,18 @@ const db = {
       return matches[0];
     }
 
-    const activeUser = await ensureRequestUserSignedIn();
-    if (!activeUser || !activeUser.uid) return null;
+    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
+    if (activeUser && activeUser.uid) {
+      const currentDoc = await firestoreDb.collection('requests').doc(activeUser.uid).get();
+      if (currentDoc.exists) {
+        return { id: currentDoc.id, ...currentDoc.data() };
+      }
+    }
 
-    const currentDoc = await firestoreDb.collection('requests').doc(activeUser.uid).get();
-    if (!currentDoc.exists || currentDoc.data().email !== normalized) return null;
-    return { id: currentDoc.id, ...currentDoc.data() };
+    const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
+    if (!snap.docs.length) return null;
+    const sorted = [...snap.docs].sort((a, b) => Number(b.data().ts || 0) - Number(a.data().ts || 0));
+    return { id: sorted[0].id, ...sorted[0].data() };
   },
   async setExistingRequestStatusByEmail(email, status){
     const normalized = String(email || '').trim().toLowerCase();
@@ -257,21 +271,29 @@ const db = {
       return;
     }
 
-    const req = await this.findExistingRequestForEmail(normalized);
-    if (req) {
-      await firestoreDb.collection('requests').doc(req.id).update({ status });
+    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
+    if (activeUser && activeUser.uid) {
+      const docRef = firestoreDb.collection('requests').doc(activeUser.uid);
+      const docSnap = await docRef.get();
+      if (docSnap.exists) {
+        await docRef.update({ status });
+        return;
+      }
     }
+
+    const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
+    const tasks = snap.docs.map(doc => firestoreDb.collection('requests').doc(doc.id).update({ status }));
+    await Promise.all(tasks);
   },
   async addRequest(data){
     const request = normalizeRequestData(data);
-    const activeUser = await ensureRequestUserSignedIn();
+    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
     const currentUserId = activeUser ? activeUser.uid : null;
-    if (!currentUserId) throw new Error('Für die Anfrage konnte keine Nutzer-Sitzung erstellt werden.');
     const docId = resolveRequestDocumentId(request.email, currentUserId);
     const existing = await this.findExistingRequestForEmail(request.email);
     if (existing) {
       const existingStatus = existing.status || 'pending';
-      if (existingStatus !== 'declined' && existingStatus !== 'denied') {
+      if (existingStatus !== 'denied') {
         return existing.id || existing.docId || null;
       }
 
@@ -285,7 +307,7 @@ const db = {
         }
       } else {
         const ref = firestoreDb.collection('requests').doc(docId);
-        await ref.set({ ...request, uid: currentUserId, status: 'pending', ts: Date.now() }, { merge: true });
+        await ref.set({ ...request, uid: currentUserId || docId, status: 'pending', ts: Date.now() }, { merge: true });
         return docId;
       }
     }
@@ -298,7 +320,7 @@ const db = {
       return id;
     }
     const ref = firestoreDb.collection('requests').doc(docId);
-    await ref.set({ ...request, uid: currentUserId, status: 'pending', ts: Date.now() });
+    await ref.set({ ...request, uid: currentUserId || docId, status: 'pending', ts: Date.now() });
     return docId;
   },
   async getRequestStatus(id){
@@ -573,9 +595,9 @@ async function checkStatus(){
     return;
   }
 
-  if (status === 'declined' || status === 'denied'){
+  if (status === 'denied'){
     stopStatusPolling();
-    setRequestFeedback(getRequestStatusMessage(status));
+    setRequestFeedback(getRequestStatusMessage('denied'));
     show('gateDenied');
     return;
   }
@@ -663,7 +685,7 @@ async function submitRequest(){
   }
 
   const existing = await db.findExistingRequestForEmail(email);
-  if (existing && (!existing.status || (existing.status !== 'declined' && existing.status !== 'denied'))) {
+  if (existing && (!existing.status || existing.status !== 'denied')) {
     console.log('[submitRequest] Found existing request for email:', email, 'Status:', existing.status);
     localStorage.setItem('wl_myRequestId', existing.id);
     setRequestFeedback(getRequestStatusMessage(existing.status || 'pending'), false);
@@ -828,7 +850,7 @@ async function renderAdmin(){
       </div>
       <span class="actions">
         <button class="btn small" onclick="respondRequest('${r.id}','approved')">Freigeben</button>
-        <button class="btn small secondary" onclick="respondRequest('${r.id}','declined')">Ablehnen</button>
+        <button class="btn small secondary" onclick="respondRequest('${r.id}','denied')">Ablehnen</button>
       </span>`;
     list.appendChild(row);
   });

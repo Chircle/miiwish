@@ -2,18 +2,23 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ---------------------------------------------------------------
-    // Globale Helper-Funktionen (auf Service-Ebene, überall nutzbar)
-    // ---------------------------------------------------------------
     function isSignedIn() {
       return request.auth != null;
     }
 
+    // Es gibt keine Cloud Function, die einen Custom Claim (admin:true)
+    // setzt — deshalb prüfen wir stattdessen eine feste Liste von
+    // Admin-UIDs. UID findest du in der Firebase Console unter
+    // Authentication -> Users -> Spalte "User UID" für deinen
+    // Admin-Account (den mit E-Mail/Passwort-Login).
     function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+      return isSignedIn() && request.auth.uid in [
+        'HIER_DEINE_ADMIN_UID_EINTRAGEN'
+        // ggf. weitere Admin-UIDs mit Komma getrennt ergänzen
+      ];
     }
 
-    // Nur diese Felder wurden im Update geändert
+    // Es wurden nur genau diese Felder verändert
     function onlyChanged(keys) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
     }
@@ -23,103 +28,75 @@ service cloud.firestore {
     // ---------------------------------------------------------------
     match /items/{itemId} {
 
-      // Sichtbar für alle (auch nicht eingeloggte Besucher),
-      // damit z.B. Reservierungsstatus global lesbar ist.
-      // Falls Titel/Beschreibung NICHT öffentlich sein sollen,
-      // hier stattdessen "if isSignedIn()" verwenden.
+      // Für alle sichtbar (auch nicht eingeloggte Besucher sehen die
+      // Struktur nicht direkt, da das Frontend die Gates davor setzt,
+      // aber roh per API wäre es lesbar — siehe Hinweis unten).
       allow read: if true;
 
-      // Nur Admin darf Items anlegen oder löschen
       allow create: if isAdmin();
       allow delete: if isAdmin();
 
-      allow update: if isSignedIn() && (
-        // Admin darf alles ändern
-        isAdmin()
-        ||
-        // Fall A: Nutzer gibt SEINE eigene Reservierung wieder frei
-        (
-          resource.data.reserved == true &&
-          resource.data.reservedBy == request.auth.uid &&
-          request.resource.data.reserved == false &&
-          request.resource.data.reservedBy == null &&
-          onlyChanged(['reserved', 'reservedBy'])
-        )
-        ||
-        // Fall B: Nutzer reserviert ein FREIES Item für sich selbst
-        (
-          resource.data.reserved == false &&
-          request.resource.data.reserved == true &&
-          request.resource.data.reservedBy == request.auth.uid &&
-          onlyChanged(['reserved', 'reservedBy']) &&
-          // Limit: max. 3 gleichzeitige Reservierungen pro Nutzer
-          // (setzt einen gepflegten Zähler in users/{uid} voraus, s.u.)
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.reservationCount < 3
-        )
-      );
-    }
-
-    // ---------------------------------------------------------------
-    // users — nur für den Reservierungszähler (kein Profildatenmodell)
-    // Wird transaktional zusammen mit dem items-Update geschrieben:
-    // Client muss reservationCount beim Reservieren +1 / beim
-    // Freigeben -1 rechnen und in DERSELBEN Batch-Write/Transaction
-    // mitschicken, sonst schlägt der items-Write fehl.
-    // ---------------------------------------------------------------
-    match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-
-      allow create: if isSignedIn() && request.auth.uid == userId &&
-        request.resource.data.reservationCount == 0;
-
       allow update: if isAdmin() || (
-        isSignedIn() && request.auth.uid == userId &&
-        onlyChanged(['reservationCount']) &&
-        request.resource.data.reservationCount >= 0 &&
-        request.resource.data.reservationCount <= 3 &&
-        // Zähler darf sich pro Schreibvorgang nur um genau 1 ändern
-        (
-          request.resource.data.reservationCount == resource.data.reservationCount + 1 ||
-          request.resource.data.reservationCount == resource.data.reservationCount - 1
+        isSignedIn() && (
+          // Reservieren: Item war frei, wird jetzt von MIR reserviert.
+          // toggleReserved() in script.js meldet den Nutzer dafür
+          // automatisch anonym an (ensureRequestUserSignedIn()).
+          (
+            resource.data.reserved == false &&
+            request.resource.data.reserved == true &&
+            request.resource.data.reservedBy == request.auth.uid &&
+            onlyChanged(['reserved', 'reservedBy'])
+          )
+          ||
+          // Freigeben: nur die EIGENE Reservierung darf ich lösen
+          (
+            resource.data.reserved == true &&
+            resource.data.reservedBy == request.auth.uid &&
+            request.resource.data.reserved == false &&
+            request.resource.data.reservedBy == null &&
+            onlyChanged(['reserved', 'reservedBy'])
+          )
         )
       );
-
-      allow delete: if isAdmin();
     }
 
     // ---------------------------------------------------------------
-    // requests — Zugriffsanfragen (Doc-ID == uid, EIN Datenmodell)
+    // requests — Zugriffsanfragen (Doc-ID == uid, so wie script.js es
+    // tatsächlich anlegt: addRequest() meldet den Nutzer IMMER zuerst
+    // anonym an und benutzt danach dessen uid als Doc-ID)
     // ---------------------------------------------------------------
     match /requests/{userId} {
 
-      // Öffentlich lesbar wäre ein Datenschutzproblem (Name/E-Mail
-      // aller Anfragen). Besser: nur eigene Anfrage oder Admin.
-      // Falls Gäste ohne Login per E-Mail-Formular den Status prüfen
-      // sollen, das lieber über eine Cloud Function machen, die
-      // serverseitig (mit Admin-SDK) nur den Status zurückgibt.
-      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      // Öffentlich lesbar, weil findExistingRequestForEmail() in
+      // script.js eine where('email','==', …)-Query braucht, um den
+      // Status-Check per E-Mail auf einem NEUEN Gerät (ohne vorheriges
+      // Login) zu ermöglichen. Firestore-Rules können eine Query nicht
+      // auf "nur mein eigenes Dokument" einschränken, wenn nach email
+      // statt nach der Doc-ID gefiltert wird.
+      // -> Name/E-Mail/Grund sind damit technisch für jeden mit
+      // direktem Firestore-Zugriff lesbar (nicht nur über die UI).
+      // Für echte Privatsphäre bräuchte es eine Cloud Function, die
+      // serverseitig nur den Status zurückgibt. Sag Bescheid, wenn du
+      // das willst, das baue ich dir gerne.
+      allow read: if true;
 
-      // Anfrage anlegen: nur die eigene UID als Doc-ID, Status muss
-      // 'pending' sein, Pflichtfelder müssen vorhanden sein.
       allow create: if isSignedIn() && request.auth.uid == userId &&
+        request.resource.data.uid == userId &&
         request.resource.data.name is string &&
         request.resource.data.email is string &&
         request.resource.data.reason is string &&
         request.resource.data.status == 'pending' &&
         request.resource.data.ts is int;
 
-      allow update: if
-        // Admin darf Status setzen (approved/declined/pending etc.)
-        isAdmin()
-        ||
-        // Nutzer darf NUR erneut einreichen, wenn er abgelehnt wurde,
-        // und darf dabei nur wieder auf 'pending' zurücksetzen —
-        // keine Selbstfreigabe möglich.
-        (
-          isSignedIn() && request.auth.uid == userId &&
-          resource.data.status == 'declined' &&
-          request.resource.data.status == 'pending'
-        );
+      // Erneutes Einreichen nach Ablehnung: nur der eigene Account,
+      // nur von 'declined' zurück auf 'pending'. Freigeben kann sich
+      // niemand selbst.
+      allow update: if isAdmin() || (
+        isSignedIn() && request.auth.uid == userId &&
+        resource.data.status == 'declined' &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.uid == userId
+      );
 
       allow delete: if isAdmin();
     }
