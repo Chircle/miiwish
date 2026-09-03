@@ -47,7 +47,8 @@ test('resolveFirebaseConfig prefers the generated global Firebase config', () =>
       storageBucket: 'miiwish-demo.appspot.com',
       messagingSenderId: '123456789',
       appId: 'app-id-123',
-      adminUids: 'uid-abc,uid-def'
+      adminUids: 'uid-abc,uid-def',
+      superuserEmail: 'schatz@example.com'
     }
   });
 
@@ -60,7 +61,8 @@ test('resolveFirebaseConfig prefers the generated global Firebase config', () =>
     storageBucket: 'miiwish-demo.appspot.com',
     messagingSenderId: '123456789',
     appId: 'app-id-123',
-    adminUids: 'uid-abc,uid-def'
+    adminUids: 'uid-abc,uid-def',
+    superuserEmail: 'schatz@example.com'
   });
 });
 
@@ -75,7 +77,8 @@ test('resolveFirebaseConfig falls back to empty defaults when no Firebase config
     storageBucket: '',
     messagingSenderId: '',
     appId: '',
-    adminUids: ''
+    adminUids: '',
+    superuserEmail: ''
   });
 });
 

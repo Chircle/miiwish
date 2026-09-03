@@ -30,6 +30,10 @@ jobs:
       # Kommasepariert, falls mehrere Admin-Accounts, z.B. "aB3xY...,cD9zQ...".
       # UID findest du in der Firebase Console unter Authentication -> Users.
       FIREBASE_ADMIN_UIDS: ${{ secrets.FIREBASE_ADMIN_UIDS }}
+      # E-Mail der "Schatz"-Sonderrolle (darf reservierte Wünsche anderer
+      # an sich reißen). Muss zusätzlich manuell in isSuperuser() in
+      # firestore.rules eingetragen werden.
+      FIREBASE_SUPERUSER_EMAIL: ${{ secrets.FIREBASE_SUPERUSER_EMAIL }}
 
     steps:
       - name: Checkout
@@ -49,7 +53,8 @@ jobs:
             storageBucket: "${FIREBASE_STORAGE_BUCKET}",
             messagingSenderId: "${FIREBASE_MESSAGING_SENDER_ID}",
             appId: "${FIREBASE_APP_ID}",
-            adminUids: "${FIREBASE_ADMIN_UIDS}"
+            adminUids: "${FIREBASE_ADMIN_UIDS}",
+            superuserEmail: "${FIREBASE_SUPERUSER_EMAIL}"
           };
           EOF
 

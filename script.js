@@ -12,7 +12,8 @@ function resolveFirebaseConfig(){
     storageBucket: "",
     messagingSenderId: "",
     appId: "",
-    adminUids: ""
+    adminUids: "",
+    superuserEmail: ""
   };
 
   const root = typeof window !== 'undefined' ? window : globalThis;
@@ -143,11 +144,17 @@ function isAdminUser(user){
 
 /* "Schatz"-Sonderrolle: darf bereits reservierte Wünsche anderer an
    sich reißen. Rein für Spaß auf einer privaten Familien-Wunschliste
-   gedacht — bewusst per fester E-Mail und nicht konfigurierbar. */
-const SUPERUSER_EMAIL = 'schatz@schatz.de';
+   gedacht. E-Mail kommt aus firebase-config.js (GitHub Secret
+   FIREBASE_SUPERUSER_EMAIL), steht nicht im Code. WICHTIG: dieselbe
+   E-Mail muss zusätzlich manuell in isSuperuser() in firestore.rules
+   eingetragen werden — die Rules werden nicht automatisiert deployt,
+   das Secret hier steuert nur, ob der Stibitzen-Button in der UI
+   angezeigt wird. Die eigentliche Berechtigung kommt immer aus den
+   Firestore Rules. */
+const SUPERUSER_EMAIL = String(firebaseConfig.superuserEmail || '').trim().toLowerCase();
 
 function isSuperuserUser(user){
-  return !!(user && user.email && user.email.toLowerCase() === SUPERUSER_EMAIL);
+  return !!(SUPERUSER_EMAIL && user && user.email && user.email.toLowerCase() === SUPERUSER_EMAIL);
 }
 
 /* Übersetzt Firebase-Auth-Fehlercodes in verständliche Meldungen.
