@@ -960,7 +960,7 @@ async function renderItems(asAdmin){
     el.innerHTML = `
       ${!asAdmin && item.reserved ? `<div class="reserved-tag">${reservedLabel}</div>` : ''}
       ${finalImage
-        ? `<img class="thumb" src="${escapeAttr(finalImage)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(color)}'))">`
+        ? `<a href="${escapeAttr(item.url)}" target="_blank" rel="noopener"> <img class="thumb" src="${escapeAttr(finalImage)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(color)}'))"> </a>`
         : fallbackThumbHtml(color)}
       <div class="body">
         <h3>${escapeHtml(item.title)}</h3>
