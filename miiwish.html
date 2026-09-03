@@ -37,26 +37,39 @@
 
   <div id="gateRequest" class="gate hidden">
     <div style="display: flex; gap: 8px; margin-bottom: 20px; justify-content: center;">
-      <button class="btn small" id="modeNewBtn" onclick="setRequestMode('new')">Neue Anfrage</button>
-      <button class="btn small secondary" id="modeCheckBtn" onclick="setRequestMode('check')">Status checken</button>
+      <button class="btn small" id="modeLoginBtn" onclick="setAuthMode('login')">Einloggen</button>
+      <button class="btn small secondary" id="modeRegisterBtn" onclick="setAuthMode('register')">Zugang anfragen</button>
     </div>
 
-    <div id="modeNew">
+    <div id="modeLogin">
+      <h2>Einloggen</h2>
+      <p>Melde dich mit deiner E-Mail und deinem Passwort an.</p>
+      <input id="loginEmailInput" type="email" placeholder="Deine E-Mail" onkeydown="if(event.key==='Enter')loginUser()" />
+      <input id="loginPasswordInput" type="password" placeholder="Passwort" onkeydown="if(event.key==='Enter')loginUser()" />
+      <button class="btn" onclick="loginUser()">Einloggen</button>
+      <div id="loginErr" class="err hidden"></div>
+      <p style="margin-top:16px; text-align:center;"><a href="#" onclick="setAuthMode('forgot'); return false;" style="font-size:12.5px; color:var(--ink-soft); text-decoration:underline;">Passwort vergessen?</a></p>
+    </div>
+
+    <div id="modeRegister" class="hidden">
       <h2>Zugang anfragen</h2>
-      <p>Bitte gib deinen Namen und deine E-Mail an, damit ich deinen Zugriff prüfen kann.</p>
+      <p>Bitte gib deinen Namen, deine E-Mail und ein Passwort an. Nach der Freigabe kannst du dich damit einloggen.</p>
       <input id="nameInput" type="text" placeholder="Dein Name" />
       <input id="emailInput" type="email" placeholder="Deine E-Mail" />
+      <input id="passwordInput" type="password" placeholder="Passwort (mind. 6 Zeichen)" />
+      <input id="passwordConfirmInput" type="password" placeholder="Passwort wiederholen" />
       <textarea id="reasonInput" rows="3" placeholder="Warum möchtest du Zugriff? (optional)"></textarea>
       <button class="btn" onclick="submitRequest()">Anfrage senden</button>
       <div id="requestErr" class="err hidden"></div>
     </div>
 
-    <div id="modeCheck" class="hidden">
-      <h2>Mein Status checken</h2>
-      <p>Gib deine E-Mail ein um deinen Zugriffsstatus zu prüfen.</p>
-      <input id="checkEmailInput" type="email" placeholder="Deine E-Mail" />
-      <button class="btn" onclick="checkStatusByEmail()">Status abrufen</button>
-      <div id="checkErr" class="err hidden"></div>
+    <div id="modeForgot" class="hidden">
+      <h2>Passwort vergessen</h2>
+      <p>Gib deine E-Mail ein — wir schicken dir einen Link zum Zurücksetzen.</p>
+      <input id="forgotEmailInput" type="email" placeholder="Deine E-Mail" onkeydown="if(event.key==='Enter')sendPasswordReset()" />
+      <button class="btn" onclick="sendPasswordReset()">Link senden</button>
+      <div id="forgotMsg" class="err hidden"></div>
+      <p style="margin-top:16px; text-align:center;"><a href="#" onclick="setAuthMode('login'); return false;" style="font-size:12.5px; color:var(--ink-soft); text-decoration:underline;">Zurück zum Login</a></p>
     </div>
   </div>
 
@@ -70,7 +83,7 @@
   <div id="gateDenied" class="gate hidden">
     <h2>Zugang nicht gewährt</h2>
     <p>Für diese Wunschliste wurde dir kein Zugang gegeben.</p>
-    <button class="btn secondary" onclick="setRequestMode('check'); show('gateRequest'); hide('gateDenied');">Nochmal checken</button>
+    <button class="btn secondary" onclick="resubmitRequest()">Erneut anfragen</button>
   </div>
 
   <section id="mainContent" class="items hidden">

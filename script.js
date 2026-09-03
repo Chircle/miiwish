@@ -119,25 +119,39 @@ function getRequestStatusMessage(status){
   return '';
 }
 
-function getRequestDocumentId(email){
-  const normalized = String(email || '').trim().toLowerCase();
-  if (!normalized) return '';
-  return `req-${normalized.replace(/[^a-z0-9]/g, '-')}`;
+/* Liste der Admin-UIDs — MUSS exakt mit isAdmin() in firestore.rules
+   übereinstimmen. Firebase Auth UID findest du in der Firebase Console
+   unter Authentication -> Users. */
+const ADMIN_UIDS = [
+  'HIER_DEINE_ADMIN_UID_EINTRAGEN'
+];
+
+function isAdminUser(user){
+  return !!(user && ADMIN_UIDS.includes(user.uid));
 }
 
-function resolveRequestDocumentId(email, uid = null){
-  if (uid) return uid;
-  return getRequestDocumentId(email);
-}
-
-async function ensureRequestUserSignedIn(){
-  if (!auth) return null;
-  if (auth.currentUser) return auth.currentUser;
-  if (auth.signInAnonymously) {
-    const result = await auth.signInAnonymously();
-    return result && result.user ? result.user : auth.currentUser;
+/* Übersetzt Firebase-Auth-Fehlercodes in verständliche Meldungen.
+   Bei Login-Fehlern wird bewusst NICHT unterschieden, ob die E-Mail
+   überhaupt existiert (verhindert, dass man durch Ausprobieren
+   herausfinden kann, welche Adressen registriert sind). */
+function mapAuthError(error){
+  const code = error && error.code;
+  switch (code){
+    case 'auth/email-already-in-use':
+      return 'Für diese E-Mail existiert bereits ein Account. Bitte stattdessen einloggen.';
+    case 'auth/invalid-email':
+      return 'Bitte eine gültige E-Mail-Adresse eingeben.';
+    case 'auth/weak-password':
+      return 'Das Passwort ist zu schwach (mindestens 6 Zeichen).';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'E-Mail oder Passwort ist falsch.';
+    case 'auth/too-many-requests':
+      return 'Zu viele Versuche. Bitte warte kurz und versuche es erneut.';
+    default:
+      return 'Das hat leider nicht geklappt. Bitte versuche es erneut.';
   }
-  return null;
 }
 
 function setRequestFeedback(message, isError = true){
@@ -174,6 +188,25 @@ function buildImageFallbackElement(color = '#C9D6EE'){
 function seedDemoIfNeeded(){
   if (localStorage.getItem('wl_items') === null) localStorage.setItem('wl_items', JSON.stringify(DEMO_ITEMS));
   if (localStorage.getItem('wl_requests') === null) localStorage.setItem('wl_requests', JSON.stringify(DEMO_REQUESTS));
+}
+
+/* Demo-Modus hat kein echtes Firebase Auth — simuliert Accounts lokal
+   in localStorage, damit sich der Login/Registrieren-Flow auch ohne
+   Firebase-Konfiguration testen lässt. */
+let demoCurrentUser = null;
+function loadDemoSession(){
+  const raw = localStorage.getItem('wl_demo_session');
+  demoCurrentUser = raw ? JSON.parse(raw) : null;
+}
+function saveDemoSession(user){
+  demoCurrentUser = user;
+  if (user) localStorage.setItem('wl_demo_session', JSON.stringify(user));
+  else localStorage.removeItem('wl_demo_session');
+}
+
+function getCurrentUser(){
+  if (DEMO_MODE) return demoCurrentUser;
+  return auth && auth.currentUser ? auth.currentUser : null;
 }
 
 /* ============================================================
@@ -223,16 +256,15 @@ const db = {
   async toggleReserved(id, reserved){
     if (DEMO_MODE){
       let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
-      items = items.map(i=> i.id===id ? {...i, reserved, reservedBy: reserved ? 'demo-user' : null} : i);
+      const user = getCurrentUser();
+      items = items.map(i=> i.id===id ? {...i, reserved, reservedBy: reserved ? (user ? user.uid : null) : null} : i);
       localStorage.setItem('wl_items', JSON.stringify(items));
       return;
     }
-    // Wer reserviert, muss dafür (anonym) eingeloggt sein — sonst kann
-    // die Firestore-Regel nicht prüfen, wem die Reservierung gehört.
-    const user = await ensureRequestUserSignedIn();
+    const user = auth && auth.currentUser ? auth.currentUser : null;
     const reservedBy = reserved ? (user ? user.uid : null) : null;
     if (reserved && !reservedBy) {
-      throw new Error('Anmeldung für Reservierung fehlgeschlagen.');
+      throw new Error('Nicht eingeloggt.');
     }
     await firestoreDb.collection('items').doc(id).update({reserved, reservedBy});
   },
@@ -241,93 +273,30 @@ const db = {
     const snap = await firestoreDb.collection('requests').orderBy('ts','asc').get();
     return snap.docs.map(d=>({id:d.id, ...d.data()}));
   },
-  async findExistingRequestForEmail(email){
-    const normalized = String(email || '').trim().toLowerCase();
-    if (!normalized) return null;
-
-    if (DEMO_MODE){
-      const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-      const matches = reqs.filter(r => String(r.email || '').toLowerCase() === normalized);
-      if (!matches.length) return null;
-      matches.sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
-      return matches[0];
-    }
-
-    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
-    if (activeUser && activeUser.uid) {
-      const currentDoc = await firestoreDb.collection('requests').doc(activeUser.uid).get();
-      if (currentDoc.exists) {
-        return { id: currentDoc.id, ...currentDoc.data() };
-      }
-    }
-
-    const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
-    if (!snap.docs.length) return null;
-    const sorted = [...snap.docs].sort((a, b) => Number(b.data().ts || 0) - Number(a.data().ts || 0));
-    return { id: sorted[0].id, ...sorted[0].data() };
-  },
-  async setExistingRequestStatusByEmail(email, status){
-    const normalized = String(email || '').trim().toLowerCase();
-    if (!normalized) return;
-
-    if (DEMO_MODE){
-      const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-      const updated = reqs.map(r => String(r.email || '').toLowerCase() === normalized ? { ...r, status } : r);
-      localStorage.setItem('wl_requests', JSON.stringify(updated));
-      return;
-    }
-
-    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
-    if (activeUser && activeUser.uid) {
-      const docRef = firestoreDb.collection('requests').doc(activeUser.uid);
-      const docSnap = await docRef.get();
-      if (docSnap.exists) {
-        await docRef.update({ status });
-        return;
-      }
-    }
-
-    const snap = await firestoreDb.collection('requests').where('email', '==', normalized).get();
-    const tasks = snap.docs.map(doc => firestoreDb.collection('requests').doc(doc.id).update({ status }));
-    await Promise.all(tasks);
-  },
-  async addRequest(data){
+  async addRequest(id, data){
     const request = normalizeRequestData(data);
-    const activeUser = auth && auth.currentUser ? auth.currentUser : null;
-    const currentUserId = activeUser ? activeUser.uid : null;
-    const docId = resolveRequestDocumentId(request.email, currentUserId);
-    const existing = await this.findExistingRequestForEmail(request.email);
-    if (existing) {
-      const existingStatus = existing.status || 'pending';
-      if (existingStatus !== 'declined') {
-        return existing.id || existing.docId || null;
-      }
-
-      if (DEMO_MODE){
-        const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-        const index = reqs.findIndex(r => r.id === docId);
-        if (index >= 0) {
-          reqs[index] = { ...reqs[index], ...request, status: 'pending', ts: Date.now() };
-          localStorage.setItem('wl_requests', JSON.stringify(reqs));
-          return reqs[index].id;
-        }
-      } else {
-        const ref = firestoreDb.collection('requests').doc(docId);
-        await ref.set({ ...request, uid: currentUserId || docId, status: 'pending', ts: Date.now() }, { merge: true });
-        return docId;
-      }
-    }
+    const payload = { ...request, uid: id, status: 'pending', ts: Date.now() };
 
     if (DEMO_MODE){
       const reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
-      const id = docId || 'req'+Date.now();
-      reqs.push({id, ...request, status:'pending', ts:Date.now()});
+      const idx = reqs.findIndex(r => r.id === id);
+      if (idx >= 0) reqs[idx] = { id, ...payload };
+      else reqs.push({ id, ...payload });
       localStorage.setItem('wl_requests', JSON.stringify(reqs));
       return id;
     }
-    const ref = firestoreDb.collection('requests').doc(docId);
-    await ref.set({ ...request, uid: currentUserId || docId, status: 'pending', ts: Date.now() });
-    return docId;
+
+    await firestoreDb.collection('requests').doc(id).set(payload);
+    return id;
+  },
+  async resubmitRequest(id){
+    if (DEMO_MODE){
+      let reqs = JSON.parse(localStorage.getItem('wl_requests') || '[]');
+      reqs = reqs.map(r => r.id===id ? {...r, status:'pending', ts:Date.now()} : r);
+      localStorage.setItem('wl_requests', JSON.stringify(reqs));
+      return;
+    }
+    await firestoreDb.collection('requests').doc(id).set({ status: 'pending', ts: Date.now() }, { merge: true });
   },
   async getRequestStatus(id){
     if (DEMO_MODE){
@@ -550,8 +519,7 @@ function stopStatusPolling(){
 function startStatusPolling(){
   stopStatusPolling();
   statusPollTimer = setInterval(async () => {
-    const myReqId = localStorage.getItem('wl_myRequestId');
-    if (!myReqId) {
+    if (!getCurrentUser()) {
       stopStatusPolling();
       return;
     }
@@ -578,21 +546,15 @@ function startAdminPolling(){
 }
 
 function getMyReservedItems(){
-  const myReqId = localStorage.getItem('wl_myRequestId');
-  if (!myReqId) return [];
-  const key = 'wl_reserved_' + myReqId;
-  return JSON.parse(localStorage.getItem(key) || '[]');
+  const user = getCurrentUser();
+  if (!user) return [];
+  return JSON.parse(localStorage.getItem('wl_reserved_' + user.uid) || '[]');
 }
 
 function setMyReservedItems(ids){
-  const myReqId = localStorage.getItem('wl_myRequestId');
-  if (!myReqId) return;
-  const key = 'wl_reserved_' + myReqId;
-  localStorage.setItem(key, JSON.stringify(ids));
-}
-
-function isAuthenticatedUser(){
-  return !!(auth && auth.currentUser && !auth.currentUser.isAnonymous);
+  const user = getCurrentUser();
+  if (!user) return;
+  localStorage.setItem('wl_reserved_' + user.uid, JSON.stringify(ids));
 }
 
 /* Zeigt "Angemeldet als …" oben im Header. text=null blendet sie aus. */
@@ -606,48 +568,49 @@ function setIdentityBar(text, options = {}){
   }
   let html = escapeHtml(text);
   if (options.resetAction) {
-    html += ` · <a href="#" onclick="${options.resetAction}; return false;">${escapeHtml(options.resetLabel || 'Nicht du?')}</a>`;
+    html += ` · <a href="#" onclick="${options.resetAction}; return false;">${escapeHtml(options.resetLabel || 'Abmelden')}</a>`;
   }
   el.innerHTML = html;
   el.classList.remove('hidden');
 }
 
-/* "Nicht du?"-Link: setzt nur die lokale Zuordnung dieses Browsers
-   zurück (nicht die Firestore-Anfrage selbst), damit sich auf einem
-   geteilten Gerät eine andere Person neu anfragen/einloggen kann. */
-function resetMyIdentity(){
-  const myReqId = localStorage.getItem('wl_myRequestId');
-  if (myReqId) localStorage.removeItem('wl_reserved_' + myReqId);
-  localStorage.removeItem('wl_myRequestId');
+async function logoutUser(){
   stopStatusPolling();
-  setIdentityBar(null);
-  hideAllGates();
-  show('gateRequest');
-  setRequestMode('new');
+  stopAdminPolling();
+  if (DEMO_MODE) {
+    saveDemoSession(null);
+    isAdmin = false;
+    document.getElementById('adminToggleBtn').textContent = 'Admin';
+    setIdentityBar(null);
+    hideAllGates();
+    show('gateRequest');
+    setAuthMode('login');
+    return;
+  }
+  if (auth) await auth.signOut();
+  // onAuthStateChanged übernimmt danach den Rest.
 }
 
 function applyAdminState(user){
-  isAdmin = !!(user && !user.isAnonymous);
+  isAdmin = isAdminUser(user);
   document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
 
-  if (!isAdmin) {
-    stopAdminPolling();
-    const myReqId = localStorage.getItem('wl_myRequestId');
-    if (!myReqId){ setIdentityBar(null); hideAllGates(); show('gateRequest'); setRequestMode('new'); return; }
-    checkStatus();
+  if (isAdmin) {
+    setIdentityBar(`Angemeldet als ${user.email || 'Admin'}`);
+    renderAdmin();
+    startAdminPolling();
+    hideAllGates();
+    show('mainContent'); show('adminArea');
+    renderItems(true);
     return;
   }
 
-  setIdentityBar(`Angemeldet als ${user.email || 'Admin'}`);
-  renderAdmin();
-  startAdminPolling();
-  hideAllGates();
-  show('mainContent'); show('adminArea');
-  renderItems(true);
+  stopAdminPolling();
+  checkStatus(user);
 }
 
 async function init(){
-  if (DEMO_MODE){ seedDemoIfNeeded(); show('demoBanner'); }
+  if (DEMO_MODE){ seedDemoIfNeeded(); loadDemoSession(); show('demoBanner'); }
 
   const stars = document.getElementById('starField');
   stars.innerHTML = '';
@@ -660,6 +623,13 @@ async function init(){
     stars.appendChild(s);
   }
 
+  setAuthMode('login');
+
+  if (DEMO_MODE){
+    applyAdminState(demoCurrentUser);
+    return;
+  }
+
   if (auth && auth.onAuthStateChanged) {
     auth.onAuthStateChanged((user) => {
       applyAdminState(user);
@@ -667,51 +637,44 @@ async function init(){
     return;
   }
 
-  isAdmin = isAuthenticatedUser();
-  document.getElementById('adminToggleBtn').textContent = isAdmin ? 'Abmelden' : 'Admin';
-
-  if (isAdmin){
-    setIdentityBar(`Angemeldet als ${auth.currentUser.email || 'Admin'}`);
-    await renderAdmin();
-    hideAllGates();
-    show('mainContent'); show('adminArea');
-    await renderItems(true);
-    return;
-  }
-
-  const myReqId = localStorage.getItem('wl_myRequestId');
-  if (!myReqId){ hideAllGates(); show('gateRequest'); setRequestMode('new'); return; }
-  await checkStatus();
+  applyAdminState(auth ? auth.currentUser : null);
 }
 
-async function checkStatus(){
-  const myReqId = localStorage.getItem('wl_myRequestId');
-  if (!myReqId){
+async function checkStatus(userParam){
+  const user = userParam || getCurrentUser();
+  if (!user){
     stopStatusPolling();
     setRequestFeedback('');
     setIdentityBar(null);
     hideAllGates();
     show('gateRequest');
+    setAuthMode('login');
     return;
   }
 
-  const reqData = await db.getRequestData(myReqId);
-  const status = reqData ? reqData.status : null;
+  const reqData = await db.getRequestData(user.uid);
   hideAllGates();
 
-  if (status === 'approved'){
+  if (!reqData){
+    // Eingeloggt, aber keine (mehr passende) Anfrage gefunden — Randfall.
+    setIdentityBar(null);
+    show('gateRequest');
+    setAuthMode('login');
+    return;
+  }
+
+  const label = reqData.name ? `${reqData.name} (${reqData.email || ''})` : (reqData.email || user.email || '');
+  setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'logoutUser()', resetLabel: 'Abmelden' });
+
+  if (reqData.status === 'approved'){
     stopStatusPolling();
     setRequestFeedback('');
     show('mainContent');
-    const label = reqData.name ? `${reqData.name} (${reqData.email || ''})` : (reqData.email || '');
-    setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'resetMyIdentity()', resetLabel: 'Nicht du?' });
     await renderItems(false);
     return;
   }
 
-  setIdentityBar(null);
-
-  if (status === 'declined'){
+  if (reqData.status === 'declined'){
     stopStatusPolling();
     setRequestFeedback(getRequestStatusMessage('declined'));
     show('gateDenied');
@@ -724,105 +687,148 @@ async function checkStatus(){
 }
 
 async function refreshAfterApprovalCheck(){
-  const myReqId = localStorage.getItem('wl_myRequestId');
-  if (!myReqId) return;
+  const user = getCurrentUser();
+  if (!user) return;
 
-  const reqData = await db.getRequestData(myReqId);
+  const reqData = await db.getRequestData(user.uid);
   if (reqData && reqData.status === 'approved') {
     hideAllGates();
     show('mainContent');
     const label = reqData.name ? `${reqData.name} (${reqData.email || ''})` : (reqData.email || '');
-    setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'resetMyIdentity()', resetLabel: 'Nicht du?' });
+    setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'logoutUser()', resetLabel: 'Abmelden' });
     await renderItems(false);
     stopStatusPolling();
   }
 }
 
-function setRequestMode(mode){
-  const modeNewEl = document.getElementById('modeNew');
-  const modeCheckEl = document.getElementById('modeCheck');
-  const modeNewBtn = document.getElementById('modeNewBtn');
-  const modeCheckBtn = document.getElementById('modeCheckBtn');
+async function resubmitRequest(){
+  const user = getCurrentUser();
+  if (!user) return;
+  await db.resubmitRequest(user.uid);
+  await checkStatus();
+}
 
-  if (mode === 'new') {
-    show(modeNewEl.id);
-    hide(modeCheckEl.id);
-    modeNewBtn.classList.remove('secondary');
-    modeCheckBtn.classList.add('secondary');
-  } else {
-    hide(modeNewEl.id);
-    show(modeCheckEl.id);
-    modeNewBtn.classList.add('secondary');
-    modeCheckBtn.classList.remove('secondary');
-    document.getElementById('checkEmailInput').value = '';
-    hide('checkErr');
+/* Umschalten zwischen Einloggen / Registrieren / Passwort vergessen */
+function setAuthMode(mode){
+  hide('modeLogin'); hide('modeRegister'); hide('modeForgot');
+  document.getElementById('modeLoginBtn').classList.toggle('secondary', mode !== 'login');
+  document.getElementById('modeRegisterBtn').classList.toggle('secondary', mode !== 'register');
+  if (mode === 'login') show('modeLogin');
+  else if (mode === 'register') show('modeRegister');
+  else if (mode === 'forgot') show('modeForgot');
+  ['loginErr','requestErr','forgotMsg'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) { e.classList.add('hidden'); e.textContent = ''; }
+  });
+}
+
+async function loginUser(){
+  const email = document.getElementById('loginEmailInput').value.trim();
+  const password = document.getElementById('loginPasswordInput').value;
+  const errEl = document.getElementById('loginErr');
+  errEl.classList.add('hidden'); errEl.textContent = '';
+
+  if (!email || !password){
+    errEl.textContent = 'Bitte E-Mail und Passwort eingeben.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  if (DEMO_MODE){
+    const users = JSON.parse(localStorage.getItem('wl_demo_users') || '[]');
+    const match = users.find(u => u.email === email.toLowerCase() && u.password === password);
+    if (!match){
+      errEl.textContent = 'E-Mail oder Passwort ist falsch.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    saveDemoSession({ uid: match.uid, email: match.email });
+    await checkStatus();
+    return;
+  }
+
+  try {
+    await auth.signInWithEmailAndPassword(email, password);
+    // onAuthStateChanged übernimmt danach den Rest.
+  } catch (error) {
+    errEl.textContent = mapAuthError(error);
+    errEl.classList.remove('hidden');
   }
 }
 
-async function checkStatusByEmail(){
-  const email = document.getElementById('checkEmailInput').value.trim();
-  const errEl = document.getElementById('checkErr');
+async function sendPasswordReset(){
+  const email = document.getElementById('forgotEmailInput').value.trim();
+  const msgEl = document.getElementById('forgotMsg');
+  msgEl.classList.remove('hidden');
 
   if (!email){
-    errEl.textContent = 'Bitte gib deine E-Mail ein.';
-    errEl.classList.remove('hidden');
+    msgEl.textContent = 'Bitte gib deine E-Mail ein.';
     return;
   }
 
-  const req = await db.findExistingRequestForEmail(email);
-  if (!req){
-    errEl.textContent = 'Für diese E-Mail wurde keine Anfrage gefunden.';
-    errEl.classList.remove('hidden');
+  if (DEMO_MODE){
+    msgEl.textContent = 'Im Demo-Modus (ohne Firebase) kann kein echter Reset-Link verschickt werden.';
     return;
   }
 
-  localStorage.setItem('wl_myRequestId', req.id);
-  errEl.classList.add('hidden');
-  await checkStatus();
+  try {
+    await auth.sendPasswordResetEmail(email);
+  } catch (error) {
+    // Absichtlich keine Fehlerunterscheidung, damit man nicht ausprobieren
+    // kann, welche E-Mail-Adressen registriert sind.
+  }
+  msgEl.textContent = 'Falls diese Adresse bei uns registriert ist, wurde eine E-Mail mit einem Link zum Zurücksetzen verschickt.';
 }
 
 async function submitRequest(){
   const name = document.getElementById('nameInput').value.trim();
   const email = document.getElementById('emailInput').value.trim();
+  const password = document.getElementById('passwordInput').value;
+  const passwordConfirm = document.getElementById('passwordConfirmInput').value;
   const reason = document.getElementById('reasonInput').value.trim();
   const errEl = document.getElementById('requestErr');
+  errEl.classList.add('hidden'); errEl.textContent = '';
 
-  if (!name || !email){
-    errEl.textContent = 'Bitte gib mindestens deinen Namen und deine E-Mail ein.';
+  if (!name || !email || !password){
+    errEl.textContent = 'Bitte Name, E-Mail und Passwort ausfüllen.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (password.length < 6){
+    errEl.textContent = 'Das Passwort muss mindestens 6 Zeichen haben.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (password !== passwordConfirm){
+    errEl.textContent = 'Die Passwörter stimmen nicht überein.';
     errEl.classList.remove('hidden');
     return;
   }
 
-  try {
-    await ensureRequestUserSignedIn();
-  } catch (error) {
-    console.error('[submitRequest] Anonymous sign-in failed:', error);
-    errEl.textContent = 'Die Anfrage konnte nicht gespeichert werden. Bitte versuche es noch einmal.';
-    errEl.classList.remove('hidden');
-    return;
-  }
-
-  const existing = await db.findExistingRequestForEmail(email);
-  if (existing && (!existing.status || existing.status !== 'declined')) {
-    console.log('[submitRequest] Found existing request for email:', email, 'Status:', existing.status);
-    localStorage.setItem('wl_myRequestId', existing.id);
-    setRequestFeedback(getRequestStatusMessage(existing.status || 'pending'), false);
+  if (DEMO_MODE){
+    const users = JSON.parse(localStorage.getItem('wl_demo_users') || '[]');
+    if (users.some(u => u.email === email.toLowerCase())){
+      errEl.textContent = 'Für diese E-Mail existiert im Demo-Modus bereits ein Account. Bitte einloggen.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    const uid = 'demo-' + Date.now();
+    users.push({ uid, email: email.toLowerCase(), password, name });
+    localStorage.setItem('wl_demo_users', JSON.stringify(users));
+    await db.addRequest(uid, { name, email, reason });
+    saveDemoSession({ uid, email: email.toLowerCase() });
     await checkStatus();
     return;
   }
 
-  errEl.classList.add('hidden');
-  console.log('[submitRequest] Sending new request for:', email);
-  const id = await db.addRequest({ name, email, reason });
-  console.log('[submitRequest] Got ID from db.addRequest:', id);
-  if (!id) {
-    errEl.textContent = 'Es ist ein Fehler beim Senden aufgetreten. Bitte versuche es erneut.';
+  try {
+    const cred = await auth.createUserWithEmailAndPassword(email, password);
+    await db.addRequest(cred.user.uid, { name, email, reason });
+    // onAuthStateChanged übernimmt danach den Rest.
+  } catch (error) {
+    errEl.textContent = mapAuthError(error);
     errEl.classList.remove('hidden');
-    return;
   }
-  localStorage.setItem('wl_myRequestId', id);
-  setRequestFeedback('Deine Anfrage wurde erfolgreich gesendet. Bitte warte auf die Freigabe.', false);
-  await checkStatus();
 }
 
 /* Items rendern */
@@ -840,11 +846,23 @@ async function renderItems(asAdmin){
     grid.appendChild(counter);
   }
 
+  const myReserved = getMyReservedItems();
+
   items.forEach(item=>{
     const finalImage = item.image || '';
     const color = item.color || '#C9D6EE';
     const el = document.createElement('div');
     el.className = 'item' + (!asAdmin && item.reserved ? ' is-reserved' : '');
+    const isMine = myReserved.includes(item.id);
+    let actionButton = '';
+    if (!asAdmin) {
+      if (!item.reserved) {
+        actionButton = `<button class="btn small" onclick="reserve('${item.id}', true)">Reservieren</button>`;
+      } else if (isMine) {
+        actionButton = `<button class="btn small secondary" onclick="reserve('${item.id}', false)">Freigeben</button>`;
+      }
+      // Von jemand anderem reserviert: gar kein Button, nur die "reserviert"-Markierung.
+    }
     el.innerHTML = `
       ${!asAdmin && item.reserved ? '<div class="reserved-tag">reserviert</div>' : ''}
       ${finalImage
@@ -856,7 +874,7 @@ async function renderItems(asAdmin){
         ${item.description ? `<div class="desc">${escapeHtml(item.description)}</div>` : ''}
         <div class="row">
           ${item.url ? `<a class="link" href="${escapeAttr(item.url)}" target="_blank" rel="noopener">Zum Produkt</a>` : '<span></span>'}
-          ${!asAdmin ? `<button class="btn small ${item.reserved?'secondary':''}" onclick="reserve('${item.id}', ${!item.reserved})">${item.reserved?'Freigeben':'Reservieren'}</button>` : ''}
+          ${actionButton}
         </div>
       </div>
     `;
@@ -1038,13 +1056,11 @@ async function renderAdmin(){
 
 async function respondRequest(id, status){
   await db.setRequestStatus(id, status);
-  const reqs = await db.getRequests();
-  const target = reqs.find(r => r.id === id);
-  if (target && target.email) {
-    await db.setExistingRequestStatusByEmail(target.email, status);
-  }
-  if (status === 'approved' && localStorage.getItem('wl_myRequestId') === id) {
-    await refreshAfterApprovalCheck();
+  if (status === 'approved') {
+    const current = getCurrentUser();
+    if (current && current.uid === id) {
+      await refreshAfterApprovalCheck();
+    }
   }
   await renderAdmin();
 }
@@ -1295,8 +1311,6 @@ if (typeof module !== 'undefined' && module.exports) {
     normalizeRequestData,
     normalizeItemInput,
     getRequestStatusMessage,
-    getRequestDocumentId,
-    resolveRequestDocumentId,
     buildImageFallbackMarkup
   };
 }
