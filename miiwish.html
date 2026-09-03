@@ -182,6 +182,19 @@
   </div>
 </div>
 
+<div id="stealModal" class="modal-backdrop hidden">
+  <div class="modal edit-modal">
+    <h3>Wunsch stibitzen?</h3>
+    <p id="stealModalIntro" style="font-size:14px; color:var(--ink-soft); margin-bottom:16px;"></p>
+    <label style="font-size:12.5px; color:var(--ink-soft); display:block; margin-bottom:6px;">Nachricht an die Person (kannst du anpassen):</label>
+    <textarea id="stealMessageInput" rows="4" style="width:100%; padding:11px 12px; border:1px solid rgba(91,71,99,.25); border-radius:10px; font-family:inherit; font-size:13.5px; resize:vertical; box-sizing:border-box;"></textarea>
+    <div class="row" style="margin-top:18px;">
+      <button class="btn secondary" onclick="closeStealModal()">Abbrechen</button>
+      <button class="btn" onclick="confirmSteal()">Ja, stibitzen 🎁</button>
+    </div>
+  </div>
+</div>
+
 <div id="adminModal" class="modal-backdrop hidden">
   <div class="modal">
     <h3>Admin-Login</h3>

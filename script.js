@@ -281,35 +281,42 @@ const db = {
     await firestoreDb.collection('items').doc(id).update(fields);
   },
   async toggleReserved(id, reserved){
+    const user = getCurrentUser();
+    let reservedByName = null;
+    if (reserved && user) {
+      const reqData = await this.getRequestData(user.uid);
+      reservedByName = reqData && reqData.name ? reqData.name : null;
+    }
+
     if (DEMO_MODE){
       let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
-      const user = getCurrentUser();
-      items = items.map(i=> i.id===id ? {...i, reserved, reservedBy: reserved ? (user ? user.uid : null) : null} : i);
+      items = items.map(i=> i.id===id ? {...i, reserved, reservedBy: reserved ? (user ? user.uid : null) : null, reservedByName: reserved ? reservedByName : null} : i);
       localStorage.setItem('wl_items', JSON.stringify(items));
       return;
     }
-    const user = auth && auth.currentUser ? auth.currentUser : null;
     const reservedBy = reserved ? (user ? user.uid : null) : null;
     if (reserved && !reservedBy) {
       throw new Error('Nicht eingeloggt.');
     }
-    await firestoreDb.collection('items').doc(id).update({reserved, reservedBy});
+    await firestoreDb.collection('items').doc(id).update({ reserved, reservedBy, reservedByName: reserved ? reservedByName : null });
   },
-  async stealItem(id, item){
+  async stealItem(id, item, message){
     const user = getCurrentUser();
     if (!user) throw new Error('Nicht eingeloggt.');
     const previousUid = item.reservedBy;
+    const reqData = await this.getRequestData(user.uid);
+    const myName = reqData && reqData.name ? reqData.name : (user.email || '');
 
     if (DEMO_MODE){
       let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
-      items = items.map(i => i.id===id ? {...i, reserved:true, reservedBy:user.uid} : i);
+      items = items.map(i => i.id===id ? {...i, reserved:true, reservedBy:user.uid, reservedByName:myName} : i);
       localStorage.setItem('wl_items', JSON.stringify(items));
       if (previousUid && previousUid !== user.uid){
         const notifs = JSON.parse(localStorage.getItem('wl_notifications') || '[]');
         notifs.push({
           id: 'n'+Date.now(),
           toUid: previousUid,
-          message: `Jemand mit besonderen Rechten hat dir „${item.title}" weggenommen — tut mir leid! Wähl dir gern etwas anderes aus.`,
+          message: message || `Tut mir leid, aber „${item.title}" hab ich schon.`,
           ts: Date.now()
         });
         localStorage.setItem('wl_notifications', JSON.stringify(notifs));
@@ -317,11 +324,11 @@ const db = {
       return;
     }
 
-    await firestoreDb.collection('items').doc(id).update({ reserved: true, reservedBy: user.uid });
+    await firestoreDb.collection('items').doc(id).update({ reserved: true, reservedBy: user.uid, reservedByName: myName });
     if (previousUid && previousUid !== user.uid){
       await firestoreDb.collection('notifications').add({
         toUid: previousUid,
-        message: `Jemand mit besonderen Rechten hat dir „${item.title}" weggenommen — tut mir leid! Wähl dir gern etwas anderes aus.`,
+        message: message || `Tut mir leid, aber „${item.title}" hab ich schon.`,
         ts: Date.now()
       });
     }
@@ -569,6 +576,7 @@ async function scrapeUrl(url){
    ============================================================ */
 let isAdmin = false;
 let lastScraped = null;
+let publicItemsCache = [];
 let statusPollTimer = null;
 let adminPollTimer = null;
 
@@ -917,6 +925,7 @@ async function renderItems(asAdmin){
   const currentUser = getCurrentUser();
   const isSuperuser = !asAdmin && isSuperuserUser(currentUser);
   const myReserved = getMyReservedIds(items);
+  if (!asAdmin) publicItemsCache = items;
 
   // Show reservation counter for users
   if (!asAdmin) {
@@ -939,13 +948,17 @@ async function renderItems(asAdmin){
       } else if (isMine) {
         actionButton = `<button class="btn small secondary" onclick="reserve('${item.id}', false)">Freigeben</button>`;
       } else if (isSuperuser) {
-        actionButton = `<button class="btn small steal-btn" onclick="stealItemAction('${item.id}')">🎁 Stibitzen</button>`;
+        actionButton = `<button class="btn small steal-btn" onclick="openStealModal('${item.id}')">🎁 Stibitzen</button>`;
       }
       // Sonst (von jemand anderem reserviert, kein Superuser): kein
       // Button, nur die "reserviert"-Markierung.
     }
+    // Wer reserviert hat, sieht nur der Superuser (Name, keine E-Mail/ID).
+    const reservedLabel = (isSuperuser && item.reserved && !isMine && item.reservedByName)
+      ? `reserviert von ${escapeHtml(item.reservedByName)}`
+      : 'reserviert';
     el.innerHTML = `
-      ${!asAdmin && item.reserved ? '<div class="reserved-tag">reserviert</div>' : ''}
+      ${!asAdmin && item.reserved ? `<div class="reserved-tag">${reservedLabel}</div>` : ''}
       ${finalImage
         ? `<img class="thumb" src="${escapeAttr(finalImage)}" alt="" onerror="this.replaceWith(fallbackThumb('${escapeAttr(color)}'))">`
         : fallbackThumbHtml(color)}
@@ -1047,14 +1060,41 @@ async function reserve(id, newState){
 }
 
 /* "Schatz"-Sonderfunktion: reißt ein bereits von jemand anderem
-   reserviertes Item an sich und benachrichtigt die vorherige Person
-   per In-App-Banner. Zählt genauso gegen das 3er-Limit wie eine
-   normale Reservierung. */
-async function stealItemAction(id){
-  const items = await db.getItems();
-  const item = items.find(i => i.id === id);
-  if (!item || !item.reserved) { await renderItems(false); return; }
+   reserviertes Item an sich. Vorher immer ein Bestätigungs-Modal mit
+   editierbarer Nachricht an die betroffene Person. Zählt genauso
+   gegen das 3er-Limit wie eine normale Reservierung. */
+let stealingItemId = null;
 
+function buildDefaultStealMessage(title){
+  return `Hey! 🎁 Tut mir leid, aber „${title}" hab ich schon vor einiger Zeit besorgt. ` +
+    `Schau doch mal, ob dir noch etwas anderes aus der Liste gefällt — Liebe Grüße!`;
+}
+
+function openStealModal(id){
+  const item = publicItemsCache.find(i => i.id === id);
+  if (!item || !item.reserved) return;
+  stealingItemId = id;
+
+  const name = item.reservedByName || 'jemandem';
+  document.getElementById('stealModalIntro').textContent =
+    `Bist du sicher, dass du ${name}s Wunsch „${item.title}" an dich nehmen möchtest?`;
+  document.getElementById('stealMessageInput').value = buildDefaultStealMessage(item.title);
+  document.getElementById('stealModal').classList.remove('hidden');
+}
+
+function closeStealModal(){
+  stealingItemId = null;
+  document.getElementById('stealModal').classList.add('hidden');
+}
+
+async function confirmSteal(){
+  const id = stealingItemId;
+  if (!id) return;
+  const item = publicItemsCache.find(i => i.id === id);
+  if (!item) { closeStealModal(); return; }
+  const message = document.getElementById('stealMessageInput').value.trim();
+
+  const items = await db.getItems();
   const myReserved = getMyReservedIds(items);
   if (myReserved.length >= 3) {
     const mine = items.filter(i => myReserved.includes(i.id));
@@ -1072,7 +1112,8 @@ async function stealItemAction(id){
     await db.toggleReserved(mine[swapId - 1].id, false);
   }
 
-  await db.stealItem(id, item);
+  await db.stealItem(id, item, message);
+  closeStealModal();
   await renderItems(false);
 }
 
