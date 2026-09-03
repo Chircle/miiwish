@@ -11,7 +11,8 @@ function resolveFirebaseConfig(){
     projectId: "",
     storageBucket: "",
     messagingSenderId: "",
-    appId: ""
+    appId: "",
+    adminUids: ""
   };
 
   const root = typeof window !== 'undefined' ? window : globalThis;
@@ -119,12 +120,14 @@ function getRequestStatusMessage(status){
   return '';
 }
 
-/* Liste der Admin-UIDs — MUSS exakt mit isAdmin() in firestore.rules
-   übereinstimmen. Firebase Auth UID findest du in der Firebase Console
-   unter Authentication -> Users. */
-const ADMIN_UIDS = [
-  'HIER_DEINE_ADMIN_UID_EINTRAGEN'
-];
+function resolveAdminUids(config){
+  return String(config.adminUids || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+const ADMIN_UIDS = resolveAdminUids(firebaseConfig);
 
 function isAdminUser(user){
   return !!(user && ADMIN_UIDS.includes(user.uid));
