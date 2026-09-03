@@ -210,6 +210,16 @@ const db = {
     }
     await firestoreDb.collection('items').doc(id).delete();
   },
+  async updateItem(id, fields){
+    if (DEMO_MODE){
+      let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
+      items = items.map(i=> i.id===id ? {...i, ...fields} : i);
+      localStorage.setItem('wl_items', JSON.stringify(items));
+      return;
+    }
+    // Voller Feld-Update, nur für Admin erlaubt (siehe Firestore Rules).
+    await firestoreDb.collection('items').doc(id).update(fields);
+  },
   async toggleReserved(id, reserved){
     if (DEMO_MODE){
       let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
@@ -999,6 +1009,7 @@ async function renderAdmin(){
   });
 
   const items = await db.getItems();
+  adminItemsCache = items;
   const itemsList = document.getElementById('adminItemsList');
   itemsList.innerHTML = items.length ? '' : '<div class="empty-note">Noch keine Wünsche.</div>';
   items.forEach(item=>{
@@ -1016,7 +1027,10 @@ async function renderAdmin(){
           <div style="font-size:12px;color:var(--ink-soft);">${escapeHtml(item.price||'')}</div>
         </div>
       </div>
-      <button class="btn small secondary" onclick="removeItem('${item.id}')">Entfernen</button>
+      <span class="actions">
+        <button class="btn small secondary" onclick="openEditModal('${item.id}')">Bearbeiten</button>
+        <button class="btn small secondary" onclick="removeItem('${item.id}')">Entfernen</button>
+      </span>
     `;
     itemsList.appendChild(row);
   });
@@ -1035,6 +1049,45 @@ async function respondRequest(id, status){
   await renderAdmin();
 }
 
+/* Rendert das Vorschaubild (oder die Pastell-"kein Bild"-Kachel) für
+   eine gegebene URL. Wird sowohl beim automatischen Scrape als auch
+   bei manueller Eingabe im Bild-URL-Feld benutzt. */
+function applyPreviewImage(url, imgId = 'previewImg', fallbackId = 'previewImgFallback'){
+  const previewColor = PALETTE[Math.floor(Math.random()*PALETTE.length)];
+  const previewImgEl = document.getElementById(imgId);
+  const previewFallbackEl = document.getElementById(fallbackId);
+  if (!previewImgEl) return;
+  previewImgEl.onerror = null;
+  if (previewFallbackEl) previewFallbackEl.classList.add('hidden');
+  if (url) {
+    previewImgEl.style.display = 'block';
+    previewImgEl.src = url;
+    previewImgEl.onerror = () => {
+      previewImgEl.style.display = 'none';
+      if (previewFallbackEl) {
+        previewFallbackEl.style.background = previewColor;
+        previewFallbackEl.textContent = 'kein Bild';
+        previewFallbackEl.classList.remove('hidden');
+      }
+    };
+  } else {
+    previewImgEl.style.display = 'none';
+    if (previewFallbackEl) {
+      previewFallbackEl.style.background = previewColor;
+      previewFallbackEl.textContent = 'kein Bild';
+      previewFallbackEl.classList.remove('hidden');
+    }
+  }
+}
+
+/* Wird aufgerufen, wenn der Admin die Bild-URL im "manuell eintragen"-
+   Feld einträgt oder ändert — dieses eine Feld wird jetzt sowohl für
+   die Scrape-Vorschau als auch für den rein manuellen Eintrag benutzt. */
+function updatePreviewImageFromInput(){
+  const url = document.getElementById('manualImage').value.trim();
+  applyPreviewImage(url);
+}
+
 /* Scraping-Flow im Admin-Panel */
 async function runScrape(){
   const url = document.getElementById('scrapeUrlInput').value.trim();
@@ -1046,33 +1099,9 @@ async function runScrape(){
   try{
     const data = await scrapeUrl(url);
     lastScraped = data;
-    const previewColor = PALETTE[Math.floor(Math.random()*PALETTE.length)];
-    const previewImage = data.image || '';
-    const previewImgEl = document.getElementById('previewImg');
-    const previewFallbackEl = document.getElementById('previewImgFallback');
-    if (previewImgEl) previewImgEl.onerror = null;
-    if (previewFallbackEl) previewFallbackEl.classList.add('hidden');
-    if (previewImgEl) {
-      previewImgEl.style.display = 'block';
-      if (previewImage) {
-        previewImgEl.src = previewImage;
-        previewImgEl.onerror = () => {
-          previewImgEl.style.display = 'none';
-          if (previewFallbackEl) {
-            previewFallbackEl.style.background = previewColor;
-            previewFallbackEl.textContent = 'kein Bild';
-            previewFallbackEl.classList.remove('hidden');
-          }
-        };
-      } else {
-        previewImgEl.style.display = 'none';
-        if (previewFallbackEl) {
-          previewFallbackEl.style.background = previewColor;
-          previewFallbackEl.textContent = 'kein Bild';
-          previewFallbackEl.classList.remove('hidden');
-        }
-      }
-    }
+    document.getElementById('manualImage').value = data.image || '';
+    applyPreviewImage(data.image || '');
+    if (document.getElementById('manualDetails')) document.getElementById('manualDetails').open = true;
     document.getElementById('previewTitle').value = data.title || '';
     document.getElementById('previewPrice').value = data.price || '';
     document.getElementById('previewDesc').value = data.description || '';
@@ -1090,14 +1119,9 @@ async function runScrape(){
   } catch(e){
     const guessedTitle = deriveTitleFromUrl(url);
     lastScraped = { url, title: guessedTitle, image:'', price:'', description:'' };
-    const previewImgEl = document.getElementById('previewImg');
-    const previewFallbackEl = document.getElementById('previewImgFallback');
-    if (previewImgEl) previewImgEl.style.display = 'none';
-    if (previewFallbackEl) {
-      previewFallbackEl.style.background = PALETTE[Math.floor(Math.random()*PALETTE.length)];
-      previewFallbackEl.textContent = 'kein Bild';
-      previewFallbackEl.classList.remove('hidden');
-    }
+    document.getElementById('manualImage').value = '';
+    applyPreviewImage('');
+    if (document.getElementById('manualDetails')) document.getElementById('manualDetails').open = true;
     document.getElementById('previewTitle').value = guessedTitle;
     document.getElementById('previewPrice').value = '';
     document.getElementById('previewDesc').value = '';
@@ -1123,15 +1147,17 @@ async function saveScrapedItem(){
     title,
     price: document.getElementById('previewPrice').value.trim(),
     description: document.getElementById('previewDesc').value.trim().slice(0,150),
-    image: lastScraped ? lastScraped.image : '',
+    image: document.getElementById('manualImage').value.trim(),
     url: lastScraped ? lastScraped.url : document.getElementById('scrapeUrlInput').value.trim()
   });
   document.getElementById('scrapeUrlInput').value = '';
+  document.getElementById('manualImage').value = '';
   hide('previewBox');
   document.getElementById('scrapeStatus').textContent = 'Wunsch gespeichert.';
   await renderAdmin();
   await renderItems(true);
 }
+
 
 async function addManualItem(){
   const title = document.getElementById('manualTitle').value.trim();
@@ -1149,6 +1175,63 @@ async function addManualItem(){
 }
 
 async function removeItem(id){ await db.deleteItem(id); await renderAdmin(); await renderItems(true); }
+
+/* Bearbeiten bestehender Wünsche */
+let adminItemsCache = [];
+let editingItemId = null;
+
+function openEditModal(id){
+  const item = adminItemsCache.find(i => i.id === id);
+  if (!item) return;
+  editingItemId = id;
+  document.getElementById('editTitle').value = item.title || '';
+  document.getElementById('editPrice').value = item.price || '';
+  document.getElementById('editUrl').value = item.url || '';
+  document.getElementById('editImageUrl').value = item.image || '';
+  document.getElementById('editDesc').value = item.description || '';
+  updateEditCharCount();
+  applyPreviewImage(item.image || '', 'editImg', 'editImgFallback');
+  const err = document.getElementById('editErr');
+  err.classList.add('hidden');
+  err.textContent = '';
+  document.getElementById('editItemModal').classList.remove('hidden');
+}
+
+function closeEditModal(){
+  editingItemId = null;
+  document.getElementById('editItemModal').classList.add('hidden');
+}
+
+function updateEditImagePreview(){
+  const url = document.getElementById('editImageUrl').value.trim();
+  applyPreviewImage(url, 'editImg', 'editImgFallback');
+}
+
+function updateEditCharCount(){
+  const val = document.getElementById('editDesc').value;
+  document.getElementById('editCharCount').textContent = val.length;
+}
+
+async function saveEditedItem(){
+  if (!editingItemId) return;
+  const title = document.getElementById('editTitle').value.trim();
+  if (!title){
+    const err = document.getElementById('editErr');
+    err.textContent = 'Bitte einen Titel eintragen.';
+    err.classList.remove('hidden');
+    return;
+  }
+  await db.updateItem(editingItemId, {
+    title,
+    price: document.getElementById('editPrice').value.trim(),
+    url: document.getElementById('editUrl').value.trim(),
+    image: document.getElementById('editImageUrl').value.trim(),
+    description: document.getElementById('editDesc').value.trim().slice(0,150)
+  });
+  closeEditModal();
+  await renderAdmin();
+  await renderItems(true);
+}
 
 /* Admin-Login */
 async function toggleAdminSession(){

@@ -119,13 +119,13 @@
         <button class="btn" onclick="saveScrapedItem()">Wunsch speichern</button>
       </div>
 
-      <details style="margin-top:20px;">
+      <details id="manualDetails" style="margin-top:20px;">
         <summary style="cursor:pointer; font-size:13px; color:var(--ink-soft);">Stattdessen manuell eintragen</summary>
         <div class="preview-fields" style="margin-top:14px;">
           <input id="manualTitle" type="text" placeholder="Titel">
           <input id="manualPrice" type="text" placeholder="Preis (optional)">
           <input id="manualUrl" type="text" placeholder="Link (optional)">
-          <input id="manualImage" type="url" placeholder="Bild-URL (optional)">
+          <input id="manualImage" type="url" placeholder="Bild-URL (optional)" oninput="updatePreviewImageFromInput()">
           <textarea id="manualDesc" maxlength="150" placeholder="Kurzbeschreibung (optional)"></textarea>
           <button class="btn small" style="justify-self:start;" onclick="addManualItem()">Manuell hinzufügen</button>
         </div>
@@ -141,6 +141,31 @@
   </div>
 
   <footer class="foot"><img src="favicon.png" alt="" class="brand-icon foot-icon">Miiwish · privat geteilt</footer>
+</div>
+
+<div id="editItemModal" class="modal-backdrop hidden">
+  <div class="modal edit-modal">
+    <h3>Wunsch bearbeiten</h3>
+    <div class="preview-grid">
+      <div class="preview-media">
+        <img id="editImg" src="" alt="">
+        <div id="editImgFallback" class="image-fallback hidden" style="background:#D7C6E3;">kein Bild</div>
+      </div>
+      <div class="preview-fields">
+        <input id="editTitle" type="text" placeholder="Titel">
+        <input id="editPrice" type="text" placeholder="Preis (z. B. 39,90 €)">
+        <input id="editUrl" type="text" placeholder="Link (optional)">
+        <input id="editImageUrl" type="url" placeholder="Bild-URL (optional)" oninput="updateEditImagePreview()">
+        <textarea id="editDesc" maxlength="150" oninput="updateEditCharCount()" placeholder="Kurzbeschreibung (max. 150 Zeichen)"></textarea>
+        <div class="char-count"><span id="editCharCount">0</span>/150</div>
+      </div>
+    </div>
+    <div id="editErr" class="err hidden"></div>
+    <div class="row">
+      <button class="btn secondary" onclick="closeEditModal()">Abbrechen</button>
+      <button class="btn" onclick="saveEditedItem()">Speichern</button>
+    </div>
+  </div>
 </div>
 
 <div id="adminModal" class="modal-backdrop hidden">
