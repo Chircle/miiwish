@@ -120,6 +120,14 @@ function getRequestStatusMessage(status){
   return '';
 }
 
+/* Admin-UIDs kommen aus firebase-config.js (per GitHub Secret
+   FIREBASE_ADMIN_UIDS generiert, kommasepariert), nicht mehr hart im
+   Code. WICHTIG: Die gleiche(n) UID(s) müssen zusätzlich manuell in
+   isAdmin() in firestore.rules eingetragen werden — die Rules-Datei
+   wird aktuell nicht automatisiert deployt, das Secret hier betrifft
+   nur den Client-Code (steuert lediglich, ob die Admin-Oberfläche
+   angezeigt wird — die eigentliche Zugriffskontrolle passiert immer
+   serverseitig über die Firestore Rules). */
 function resolveAdminUids(config){
   return String(config.adminUids || '')
     .split(',')
@@ -131,6 +139,15 @@ const ADMIN_UIDS = resolveAdminUids(firebaseConfig);
 
 function isAdminUser(user){
   return !!(user && ADMIN_UIDS.includes(user.uid));
+}
+
+/* "Schatz"-Sonderrolle: darf bereits reservierte Wünsche anderer an
+   sich reißen. Rein für Spaß auf einer privaten Familien-Wunschliste
+   gedacht — bewusst per fester E-Mail und nicht konfigurierbar. */
+const SUPERUSER_EMAIL = 'schatz@schatz.de';
+
+function isSuperuserUser(user){
+  return !!(user && user.email && user.email.toLowerCase() === SUPERUSER_EMAIL);
 }
 
 /* Übersetzt Firebase-Auth-Fehlercodes in verständliche Meldungen.
@@ -270,6 +287,54 @@ const db = {
       throw new Error('Nicht eingeloggt.');
     }
     await firestoreDb.collection('items').doc(id).update({reserved, reservedBy});
+  },
+  async stealItem(id, item){
+    const user = getCurrentUser();
+    if (!user) throw new Error('Nicht eingeloggt.');
+    const previousUid = item.reservedBy;
+
+    if (DEMO_MODE){
+      let items = JSON.parse(localStorage.getItem('wl_items') || '[]');
+      items = items.map(i => i.id===id ? {...i, reserved:true, reservedBy:user.uid} : i);
+      localStorage.setItem('wl_items', JSON.stringify(items));
+      if (previousUid && previousUid !== user.uid){
+        const notifs = JSON.parse(localStorage.getItem('wl_notifications') || '[]');
+        notifs.push({
+          id: 'n'+Date.now(),
+          toUid: previousUid,
+          message: `Jemand mit besonderen Rechten hat dir „${item.title}" weggenommen — tut mir leid! Wähl dir gern etwas anderes aus.`,
+          ts: Date.now()
+        });
+        localStorage.setItem('wl_notifications', JSON.stringify(notifs));
+      }
+      return;
+    }
+
+    await firestoreDb.collection('items').doc(id).update({ reserved: true, reservedBy: user.uid });
+    if (previousUid && previousUid !== user.uid){
+      await firestoreDb.collection('notifications').add({
+        toUid: previousUid,
+        message: `Jemand mit besonderen Rechten hat dir „${item.title}" weggenommen — tut mir leid! Wähl dir gern etwas anderes aus.`,
+        ts: Date.now()
+      });
+    }
+  },
+  async getNotifications(uid){
+    if (DEMO_MODE){
+      const notifs = JSON.parse(localStorage.getItem('wl_notifications') || '[]');
+      return notifs.filter(n => n.toUid === uid);
+    }
+    const snap = await firestoreDb.collection('notifications').where('toUid','==',uid).get();
+    return snap.docs.map(d => ({id:d.id, ...d.data()}));
+  },
+  async dismissNotification(id){
+    if (DEMO_MODE){
+      let notifs = JSON.parse(localStorage.getItem('wl_notifications') || '[]');
+      notifs = notifs.filter(n => n.id !== id);
+      localStorage.setItem('wl_notifications', JSON.stringify(notifs));
+      return;
+    }
+    await firestoreDb.collection('notifications').doc(id).delete();
   },
   async getRequests(){
     if (DEMO_MODE) return JSON.parse(localStorage.getItem('wl_requests') || '[]');
@@ -548,16 +613,14 @@ function startAdminPolling(){
   }, 3000);
 }
 
-function getMyReservedItems(){
+/* Welche Items gehören aktuell (laut Firestore, nicht laut lokalem
+   Zwischenspeicher) zum eingeloggten Nutzer. So bleibt die Anzeige
+   auch dann korrekt, wenn ein Item z.B. per stealItem() den Besitzer
+   gewechselt hat. */
+function getMyReservedIds(items){
   const user = getCurrentUser();
   if (!user) return [];
-  return JSON.parse(localStorage.getItem('wl_reserved_' + user.uid) || '[]');
-}
-
-function setMyReservedItems(ids){
-  const user = getCurrentUser();
-  if (!user) return;
-  localStorage.setItem('wl_reserved_' + user.uid, JSON.stringify(ids));
+  return items.filter(i => i.reservedBy === user.uid).map(i => i.id);
 }
 
 /* Zeigt "Angemeldet als …" oben im Header. text=null blendet sie aus. */
@@ -580,6 +643,7 @@ function setIdentityBar(text, options = {}){
 async function logoutUser(){
   stopStatusPolling();
   stopAdminPolling();
+  stopNotificationPolling();
   if (DEMO_MODE) {
     saveDemoSession(null);
     isAdmin = false;
@@ -600,6 +664,7 @@ function applyAdminState(user){
 
   if (isAdmin) {
     setIdentityBar(`Angemeldet als ${user.email || 'Admin'}`);
+    stopNotificationPolling();
     renderAdmin();
     startAdminPolling();
     hideAllGates();
@@ -674,6 +739,7 @@ async function checkStatus(userParam){
     setRequestFeedback('');
     show('mainContent');
     await renderItems(false);
+    startNotificationPolling();
     return;
   }
 
@@ -701,6 +767,7 @@ async function refreshAfterApprovalCheck(){
     setIdentityBar(`Angemeldet als ${label}`, { resetAction: 'logoutUser()', resetLabel: 'Abmelden' });
     await renderItems(false);
     stopStatusPolling();
+    startNotificationPolling();
   }
 }
 
@@ -840,16 +907,17 @@ async function renderItems(asAdmin){
   const grid = document.getElementById('itemsGrid');
   grid.innerHTML = '';
 
+  const currentUser = getCurrentUser();
+  const isSuperuser = !asAdmin && isSuperuserUser(currentUser);
+  const myReserved = getMyReservedIds(items);
+
   // Show reservation counter for users
   if (!asAdmin) {
-    const myReserved = getMyReservedItems();
     const counter = document.createElement('div');
     counter.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 20px 0; font-size: 14px; color: var(--ink-soft); border-bottom: 1px solid rgba(91,71,99,.12); margin-bottom: 10px;';
     counter.textContent = `Du hast ${myReserved.length} von 3 Artikeln ausgewählt`;
     grid.appendChild(counter);
   }
-
-  const myReserved = getMyReservedItems();
 
   items.forEach(item=>{
     const finalImage = item.image || '';
@@ -863,8 +931,11 @@ async function renderItems(asAdmin){
         actionButton = `<button class="btn small" onclick="reserve('${item.id}', true)">Reservieren</button>`;
       } else if (isMine) {
         actionButton = `<button class="btn small secondary" onclick="reserve('${item.id}', false)">Freigeben</button>`;
+      } else if (isSuperuser) {
+        actionButton = `<button class="btn small steal-btn" onclick="stealItemAction('${item.id}')">🎁 Stibitzen</button>`;
       }
-      // Von jemand anderem reserviert: gar kein Button, nur die "reserviert"-Markierung.
+      // Sonst (von jemand anderem reserviert, kein Superuser): kein
+      // Button, nur die "reserviert"-Markierung.
     }
     el.innerHTML = `
       ${!asAdmin && item.reserved ? '<div class="reserved-tag">reserviert</div>' : ''}
@@ -887,6 +958,10 @@ async function renderItems(asAdmin){
     grid.appendChild(el);
   });
   if (!items.length) grid.innerHTML = '<p class="empty-note">Noch keine Wünsche eingetragen.</p>';
+
+  if (!asAdmin) {
+    await checkNotifications();
+  }
 }
 function fallbackThumbHtml(color){
   return buildImageFallbackMarkup(color);
@@ -932,44 +1007,105 @@ async function reserve(id, newState){
   if (!newState) {
     // User is unreserving - just do it
     await db.toggleReserved(id, false);
-    const myReserved = getMyReservedItems();
-    setMyReservedItems(myReserved.filter(rid => rid !== id));
     await renderItems(false);
     return;
   }
 
   // User wants to reserve (newState = true)
-  const myReserved = getMyReservedItems();
+  const items = await db.getItems();
+  const myReserved = getMyReservedIds(items);
   if (myReserved.length >= 3) {
     // Already have 3, need to pick one to replace
-    const items = await db.getItems();
     const reserved = items.filter(i => myReserved.includes(i.id));
-    
+
     let swapId = prompt(
       'Du kannst maximal 3 Artikel auswählen. Welchen möchtest du ersetzen?\n\n' +
       reserved.map((i, idx) => `${idx + 1}. ${i.title}`).join('\n') +
       '\n\n(Gib 1, 2 oder 3 ein, oder drücke Escape zum Abbrechen)'
     );
-    
+
     if (!swapId) return;
     swapId = parseInt(swapId);
     if (swapId < 1 || swapId > 3 || isNaN(swapId)) {
       alert('Ungültige Eingabe.');
       return;
     }
-    
+
     const oldId = reserved[swapId - 1].id;
     await db.toggleReserved(oldId, false);
-    setMyReservedItems(myReserved.filter(rid => rid !== oldId));
   }
 
   await db.toggleReserved(id, true);
-  const updated = getMyReservedItems();
-  if (!updated.includes(id)) {
-    updated.push(id);
-    setMyReservedItems(updated);
-  }
   await renderItems(false);
+}
+
+/* "Schatz"-Sonderfunktion: reißt ein bereits von jemand anderem
+   reserviertes Item an sich und benachrichtigt die vorherige Person
+   per In-App-Banner. Zählt genauso gegen das 3er-Limit wie eine
+   normale Reservierung. */
+async function stealItemAction(id){
+  const items = await db.getItems();
+  const item = items.find(i => i.id === id);
+  if (!item || !item.reserved) { await renderItems(false); return; }
+
+  const myReserved = getMyReservedIds(items);
+  if (myReserved.length >= 3) {
+    const mine = items.filter(i => myReserved.includes(i.id));
+    let swapId = prompt(
+      'Du hast schon 3 Artikel ausgewählt. Welchen möchtest du dafür freigeben?\n\n' +
+      mine.map((i, idx) => `${idx + 1}. ${i.title}`).join('\n') +
+      '\n\n(Zahl eingeben oder Escape zum Abbrechen)'
+    );
+    if (!swapId) return;
+    swapId = parseInt(swapId);
+    if (swapId < 1 || swapId > mine.length || isNaN(swapId)) {
+      alert('Ungültige Eingabe.');
+      return;
+    }
+    await db.toggleReserved(mine[swapId - 1].id, false);
+  }
+
+  await db.stealItem(id, item);
+  await renderItems(false);
+}
+
+/* Benachrichtigungs-Banner: zeigt "dir wurde ein Wunsch weggenommen"-
+   Meldungen für den eingeloggten Nutzer. */
+let notificationPollTimer = null;
+
+async function checkNotifications(){
+  const user = getCurrentUser();
+  const el = document.getElementById('notificationBanner');
+  if (!el) return;
+  if (!user) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+
+  const notifs = await db.getNotifications(user.uid);
+  if (!notifs.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+
+  el.innerHTML = notifs.map(n => `
+    <div class="notification-item">
+      <span>${escapeHtml(n.message)}</span>
+      <button class="btn small secondary" onclick="dismissNotification('${n.id}')">Ok, schade 💔</button>
+    </div>
+  `).join('');
+  el.classList.remove('hidden');
+}
+
+async function dismissNotification(id){
+  await db.dismissNotification(id);
+  await checkNotifications();
+}
+
+function startNotificationPolling(){
+  stopNotificationPolling();
+  notificationPollTimer = setInterval(checkNotifications, 8000);
+}
+
+function stopNotificationPolling(){
+  if (notificationPollTimer) {
+    clearInterval(notificationPollTimer);
+    notificationPollTimer = null;
+  }
 }
 
 /* Admin */
@@ -1314,6 +1450,7 @@ if (typeof module !== 'undefined' && module.exports) {
     normalizeRequestData,
     normalizeItemInput,
     getRequestStatusMessage,
+    resolveAdminUids,
     buildImageFallbackMarkup
   };
 }

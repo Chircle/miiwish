@@ -46,7 +46,8 @@ test('resolveFirebaseConfig prefers the generated global Firebase config', () =>
       projectId: 'miiwish-demo',
       storageBucket: 'miiwish-demo.appspot.com',
       messagingSenderId: '123456789',
-      appId: 'app-id-123'
+      appId: 'app-id-123',
+      adminUids: 'uid-abc,uid-def'
     }
   });
 
@@ -58,7 +59,8 @@ test('resolveFirebaseConfig prefers the generated global Firebase config', () =>
     projectId: 'miiwish-demo',
     storageBucket: 'miiwish-demo.appspot.com',
     messagingSenderId: '123456789',
-    appId: 'app-id-123'
+    appId: 'app-id-123',
+    adminUids: 'uid-abc,uid-def'
   });
 });
 
@@ -72,7 +74,8 @@ test('resolveFirebaseConfig falls back to empty defaults when no Firebase config
     projectId: '',
     storageBucket: '',
     messagingSenderId: '',
-    appId: ''
+    appId: '',
+    adminUids: ''
   });
 });
 
@@ -136,25 +139,32 @@ test('normalizeItemInput cleans manual product input and preserves the image URL
   assert.equal(item.image, 'https://images.example/buch.jpg');
 });
 
-test('getRequestPendingMessage clearly tells the user that a request was already sent', () => {
+test('getRequestStatusMessage clearly tells the user that a request was already sent', () => {
   const { getRequestStatusMessage } = loadScriptWithWindow({});
 
   assert.equal(getRequestStatusMessage('pending'), 'Du hast bereits eine Anfrage gestellt. Bitte warte auf die Freigabe.');
   assert.equal(getRequestStatusMessage('approved'), 'Dein Zugriff wurde freigegeben. Du kannst deine Wunschliste jetzt sehen.');
-  assert.equal(getRequestStatusMessage('denied'), 'Dein Zugang wurde nicht freigegeben.');
+  // Status heißt seit dem Umbau auf echten E-Mail/Passwort-Login
+  // 'declined', nicht mehr 'denied' (muss exakt zu respondRequest() /
+  // der Firestore-Rule für das Resubmit passen).
+  assert.equal(getRequestStatusMessage('declined'), 'Dein Zugang wurde nicht freigegeben.');
   assert.equal(getRequestStatusMessage(null), '');
 });
 
-test('getRequestDocumentId is stable for the same email and keeps duplicate requests from being created', () => {
-  const { getRequestDocumentId, resolveRequestDocumentId } = loadScriptWithWindow({});
+test('resolveAdminUids splits the comma-separated GitHub-Secret value and trims whitespace', () => {
+  const { resolveAdminUids } = loadScriptWithWindow({});
 
-  const idA = getRequestDocumentId('  Max@example.com  ');
-  const idB = getRequestDocumentId('max@example.com');
-  const uidId = resolveRequestDocumentId('max@example.com', 'uid-123');
+  assert.deepEqual(
+    [...resolveAdminUids({ adminUids: ' uid-1 , uid-2,uid-3 ' })],
+    ['uid-1', 'uid-2', 'uid-3']
+  );
+});
 
-  assert.equal(idA, idB);
-  assert.equal(uidId, 'uid-123');
-  assert.ok(idA.length > 0);
+test('resolveAdminUids returns an empty array when no admin UIDs are configured', () => {
+  const { resolveAdminUids } = loadScriptWithWindow({});
+
+  assert.deepEqual([...resolveAdminUids({})], []);
+  assert.deepEqual([...resolveAdminUids({ adminUids: '' })], []);
 });
 
 test('buildImageFallbackMarkup creates a pastel placeholder with the no-image label', () => {

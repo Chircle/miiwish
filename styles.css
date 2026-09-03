@@ -120,6 +120,18 @@
   }
   .empty-note{ color:var(--ink-soft); font-size:14px; }
 
+  .notification-banner{
+    display:flex; flex-direction:column; gap:10px;
+    margin:0 0 24px;
+  }
+  .notification-item{
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+    background:linear-gradient(120deg, var(--blush), var(--lavender));
+    border-radius:16px; padding:14px 20px; font-size:13.5px; color:var(--ink);
+  }
+  .steal-btn{ background:var(--gold); color:var(--ink); }
+  .steal-btn:hover{ background:var(--gold); filter:brightness(1.08); }
+
   /* ---- admin ---- */
   .panel{
     background:#fff; border:1px solid rgba(91,71,99,.1);
